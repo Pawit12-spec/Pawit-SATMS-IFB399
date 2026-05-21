@@ -112,31 +112,74 @@ def thermal_analytics(result):
     return {"analysis": analysis}
 
 
-def localize_and_draw(image_path, output_dir="Alert_System/flagged_images"):
-    os.makedirs(output_dir, exist_ok=True)
+def localize_and_draw(image_path, camera_id="Substation_Alpha_Cam1", output_path=None):
+    """
+    Localise the hotspot using HSV colour thresholding and annotate the image.
 
-    img_tensor = transform(Image.open(image_path).convert("RGB")).unsqueeze(0).to(device)
-    cam_raw    = classifier.generate_cam(img_tensor, HOTSPOT_IDX)
+    Classification is already done by analyse_image() — this function only handles
+    WHERE the hotspot is. It reads temperature directly from the false-colour image:
+    orange/yellow pixels are warm, blue pixels are cold.
+
+    Red wraps in HSV (hue 0-8 AND 165-180), so three ranges are checked to avoid
+    missing very-hot blobs that appear red on the colormap.
+
+    Equipment zones from substation_configs are masked out before detection so
+    normal equipment heat does not trigger false circles.
+
+    Args:
+        image_path:  path to the thermal PNG to annotate
+        camera_id:   camera identifier, used to look up zone coordinates
+        output_path: where to save the annotated image; overwrites in place if None
+
+    Returns:
+        (save_path, detections) where detections is a list of (cx, cy, radius) tuples.
+        Empty list means CNN flagged a hotspot but no warm pixels were found outside
+        the equipment zones (possible very faint or borderline case).
+    """
+    from .substation_configs import SUBSTATION_ZONES
+
+    CAM_H, CAM_W = 24, 32
 
     img_cv       = cv2.imread(image_path)
     img_h, img_w = img_cv.shape[:2]
+    scale_x      = img_w / CAM_W
+    scale_y      = img_h / CAM_H
+    zones        = SUBSTATION_ZONES.get(camera_id, [])
 
-    cam_up    = np.clip(cv2.resize(cam_raw, (img_w, img_h), interpolation=cv2.INTER_CUBIC), 0, 1)
-    cam_uint8 = (cam_up * 255).astype(np.uint8)
-    _, binary = cv2.threshold(cam_uint8, int(CAM_THRESHOLD * 255), 255, cv2.THRESH_BINARY)
+    # green boxes for known safe equipment zones
+    for zone in zones:
+        x1 = int(zone["startX"] * scale_x)
+        y1 = int(zone["startY"] * scale_y)
+        x2 = int(zone["endX"]   * scale_x)
+        y2 = int(zone["endY"]   * scale_y)
+        cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 200, 0), 1)
 
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # build warm-pixel mask across three HSV ranges
+    hsv    = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+    lo_red = cv2.inRange(hsv, np.array([0,   80, 80]), np.array([8,   255, 255]))
+    orange = cv2.inRange(hsv, np.array([8,   80, 80]), np.array([35,  255, 255]))
+    hi_red = cv2.inRange(hsv, np.array([165, 80, 80]), np.array([180, 255, 255]))
+    mask   = cv2.bitwise_or(cv2.bitwise_or(lo_red, orange), hi_red)
 
-    final_x, final_y = img_w // 2, img_h // 2
+    # zero out safe zones so equipment heat is ignored
+    for zone in zones:
+        x1 = int(zone["startX"] * scale_x)
+        y1 = int(zone["startY"] * scale_y)
+        x2 = int(zone["endX"]   * scale_x)
+        y2 = int(zone["endY"]   * scale_y)
+        mask[y1:y2, x1:x2] = 0
 
-    if contours:
-        largest = max(contours, key=cv2.contourArea)
-        (cx, cy), radius = cv2.minEnclosingCircle(largest)
-        final_x, final_y = int(cx), int(cy)
-        cv2.circle(img_cv, (final_x, final_y), max(int(radius) + 2, 3), (0, 0, 255), 1)
-        cv2.circle(img_cv, (final_x, final_y), 1, (0, 0, 255), -1)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    detections  = []
+    for contour in contours:
+        if cv2.contourArea(contour) < 1:
+            continue
+        (cx, cy), r = cv2.minEnclosingCircle(contour)
+        cx, cy, r   = int(cx), int(cy), max(int(r) + 1, 2)
+        cv2.circle(img_cv, (cx, cy), r, (0, 0, 255), 1)
+        cv2.circle(img_cv, (cx, cy), 1, (0, 0, 255), -1)
+        detections.append((cx, cy, r))
 
-    save_path = os.path.join(output_dir, f"LOCATED_{os.path.basename(image_path)}")
+    save_path = output_path or image_path
     cv2.imwrite(save_path, img_cv)
-
-    return save_path, final_x, final_y
+    return save_path, detections

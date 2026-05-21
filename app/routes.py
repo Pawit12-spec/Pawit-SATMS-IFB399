@@ -27,7 +27,7 @@ from .sse import SSEBroker, stream
 import threading
 import time
 from .Alert_System import alert
-from .thermal_model.model import analyse_image as thermal_analyse_image, thermal_analytics
+from .thermal_model.model import analyse_image as thermal_analyse_image, thermal_analytics, localize_and_draw as thermal_localize
 from .thermal_model.substation_configs import get_zone_temperatures, EQUIPMENT_THRESHOLDS, update_equipment_counters
 from .ml import score_reading, data_analytics
 
@@ -860,8 +860,15 @@ def upload_image():
     except Exception:
         pass
 
-    # Hotspot alert
+    # Hotspot alert + HSV localisation
     if thermal_result["is_anomaly"]:
+        try:
+            _, detections = thermal_localize(str(save_path), camera_id=camera_id)
+            current_app.logger.info(
+                "Hotspot localised — %d blob(s) found [%s]", len(detections), camera_id
+            )
+        except Exception as e:
+            current_app.logger.warning("Hotspot localisation failed: %s", e)
         try:
             a = alert.HighPriorityAlert(
                 f"Irregular hotspot detected — camera {camera_id}. "
