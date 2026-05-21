@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+
+{% block title %}{% if site_info %}{{ site_info.name }} |{% endif %} Dashboard{% endblock %}
+
+{% block sidebar_site_nav %}
+{% if site_info %}
+<div class="sidebar-site-label">{{ site_info.name }}</div>
+<a href="{{ url_for('main.dashboard', site_id=site_info.site_id) }}"
+  class="menu-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
+  <img src="{{ url_for('static', filename='img/home-1-36x36.svg') }}" class="menu-icon" />
+  <span>OVERVIEW</span>
+</a>
+<a href="{{ url_for('main.temperature', site_id=site_info.site_id) }}"
+  class="menu-link {% if request.endpoint == 'main.temperature' %}active{% endif %}">
+  <img src="{{ url_for('static', filename='img/thermometer-1-36x36.svg') }}" class="menu-icon" />
+  <span>TEMPERATURE</span>
+</a>
+<a href="{{ url_for('main.humidity', site_id=site_info.site_id) }}"
+  class="menu-link {% if request.endpoint == 'main.humidity' %}active{% endif %}">
+  <img src="{{ url_for('static', filename='img/humidity-1-36x36.svg') }}" class="menu-icon" />
+  <span>HUMIDITY</span>
+</a>
+<a href="{{ url_for('main.co2', site_id=site_info.site_id) }}"
+  class="menu-link {% if request.endpoint == 'main.co2' %}active{% endif %}">
+  <img src="{{ url_for('static', filename='img/carbon-dioxide-1-36x36.svg') }}" class="menu-icon" />
+  <span>CO2</span>
+</a>
+<a href="{{ url_for('main.air_quality', site_id=site_info.site_id) }}"
+  class="menu-link {% if request.endpoint == 'main.air_quality' %}active{% endif %}">
+  <img src="{{ url_for('static', filename='img/wind-1-36x36.svg') }}" class="menu-icon" />
+  <span>AIR QUALITY</span>
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='sensor.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='overview.css') }}" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='indexjs.js') }}"></script>
+
+{% if site_info %}
+<script>var SITE_ID = {{ site_info.site_id | tojson }};</script>
+{% else %}
+<script>var SITE_ID = null;</script>
+{% endif %}
+
+<div class="substation-data-overview">
+  {% if site_info %}
+  <div class="site-breadcrumb">
+    <a href="{{ url_for('main.index') }}" class="breadcrumb-link">← All Sites</a>
+    <div class="site-switcher-wrap">
+      <span class="site-switcher-label">Substation</span>
+      <select id="site-switcher" class="period-dropdown site-switcher-select" aria-label="Switch substation">
+      </select>
+    </div>
+  </div>
+  <span class="page-title">{{ site_info.name | upper }}</span>
+  <span class="page-subtitle">{{ site_info.region or '' }}{% if site_info.region and site_info.address %} · {% endif %}{{ site_info.address or '' }}</span>
+  {% else %}
+  <div class="site-breadcrumb">
+    <div class="site-switcher-wrap">
+      <span class="site-switcher-label">Substation</span>
+      <select id="site-switcher" class="period-dropdown site-switcher-select" aria-label="Switch substation">
+      </select>
+    </div>
+  </div>
+  <span class="page-title">OVERVIEW</span>
+  {% endif %}
+
+  <div id="modal-analysis" class="site-modal-analysis"
+    style="display:none; margin: 0 auto 12px; max-width: 600px; text-align: center;">
+    <div id="modal-analysis-msg" class="modal-alert-item modal-alert-warning" style="justify-content: center;">
+    </div>
+  </div>
+  <div class="cards-grid">
+    <!-----------TEMPERATURE MONITOR---------->
+    <section class="card" id="card-temp">
+      <div class="card-top">
+        <div class="card-title">
+          <img class="card-icon" src="{{ url_for('static', filename='img/thermometer-2-36x36.svg') }}" />
+          <img class="card-label" src="{{ url_for('static', filename='img/TEMPERATURE.svg') }}" />
+        </div>
+        <span class="card-dot ok"></span>
+      </div>
+
+      <div class="card-divider"></div>
+
+      <div class="card-cols">
+        <div class="card-col">
+          <div class="card-col-label">CURRENT</div>
+          <div class="card-value good">
+            <span id="temp-current">27</span><span class="unit">°C</span>
+          </div>
+        </div>
+        <div class="card-col">
+          <div class="card-col-label">AVERAGE</div>
+          <div class="card-value good"><span id="temp-avg">27</span><span class="unit">°C</span></div>
+        </div>
+      </div>
+      <div class="card-chart"><canvas id="tempChart"></canvas></div>
+      <div class="card-status">[CURRENT STATUS]</div>
+    </section>
+    <!-----------HUMIDITY MONITOR---------->
+    <section class="card" id="card-hum">
+      <div class="card-top">
+        <div class="card-title">
+          <img class="card-icon" src="{{ url_for('static', filename='img/humidity-2-36x36.svg') }}" />
+          <img class="card-label" src="{{ url_for('static', filename='img/HUMIDITY.svg') }}" />
+        </div>
+        <span class="card-dot ok"></span>
+      </div>
+
+      <div class="card-divider"></div>
+
+      <div class="card-cols">
+        <div class="card-col">
+          <div class="card-col-label">CURRENT</div>
+          <div class="card-value good">
+            <span id="hum-current">54</span><span class="unit">%</span>
+          </div>
+        </div>
+        <div class="card-col">
+          <div class="card-col-label">AVERAGE</div>
+          <div class="card-value good"><span id="hum-avg">52</span><span class="unit">%</span></div>
+        </div>
+      </div>
+
+      <div class="card-chart"><canvas id="humChart"></canvas></div>
+      <div class="card-status">[CURRENT STATUS]</div>
+    </section>
+    <!-----------CO2 MONITOR---------->
+    <section class="card" id="card-co2">
+      <div class="card-top">
+        <div class="card-title">
+          <img class="card-icon" src="{{ url_for('static', filename='img/co2-cloud-2-36x36.svg') }}" />
+          <img class="card-label" src="{{ url_for('static', filename='img/CO2.svg') }}" />
+        </div>
+        <span class="card-dot ok"></span>
+      </div>
+
+      <div class="card-divider"></div>
+
+      <div class="card-cols">
+        <div class="card-col">
+          <div class="card-col-label">CURRENT</div>
+          <div class="card-value good"><span id="co2-current">930</span><span class="unit">ppm</span></div>
+        </div>
+        <div class="card-col">
+          <div class="card-col-label">AVERAGE</div>
+          <div class="card-value good"><span id="co2-avg">850</span><span class="unit">ppm</span></div>
+        </div>
+      </div>
+
+      <div class="card-chart"><canvas id="co2Chart"></canvas></div>
+      <div class="card-status">[CURRENT STATUS]</div>
+    </section>
+    <!-----------AIR QUALITY MONITOR---------->
+    <section class="card" id="card-aqi">
+      <div class="card-top">
+        <div class="card-title">
+          <img class="card-icon" src="{{ url_for('static', filename='img/wind-2-36x36.svg') }}" />
+          <img class="card-label" src="{{ url_for('static', filename='img/AIR-QUALITY.svg') }}" />
+        </div>
+        <span class="card-dot ok"></span>
+      </div>
+
+      <div class="card-divider"></div>
+
+      <div class="card-cols">
+        <div class="card-col">
+          <div class="card-col-label">CURRENT</div>
+          <div class="card-value good"><span id="aqi-current">18</span><span class="unit">µg/m³</span></div>
+        </div>
+        <div class="card-col">
+          <div class="card-col-label">AVERAGE</div>
+          <div class="card-value good"><span id="aqi-avg">22</span><span class="unit">µg/m³</span></div>
+        </div>
+      </div>
+
+      <div class="card-chart"><canvas id="aqiChart"></canvas></div>
+      <div class="card-status">[CURRENT STATUS]</div>
+    </section>
+  </div>
+</div>
+
+<script>
+  const tempChart = LineChartMaker(document.getElementById('tempChart'), '#ef4444');
+  const humChart = LineChartMaker(document.getElementById('humChart'), '#a855f7');
+  const co2Chart = LineChartMaker(document.getElementById('co2Chart'), '#22d3ee');
+  const aqiChart = LineChartMaker(document.getElementById('aqiChart'), '#f59e0b');
+
+  RestoreChart(tempChart, 'chart_temp');
+  RestoreChart(humChart, 'chart_hum');
+  RestoreChart(co2Chart, 'chart_co2');
+  RestoreChart(aqiChart, 'chart_aqi');
+  RestoreDashboardState();
+
+  /* ---- fetch latest readings from API on page load ---- */
+  function loadOverview() {
+    var url = '/api/overview?n=20';
+    if (window.SITE_ID) url += '&site_id=' + encodeURIComponent(window.SITE_ID);
+    fetch(url)
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        var rows = data.readings || [];
+        if (!rows.length) return;
+
+        /* rebuild all 4 charts */
+        var labels = rows.map(function (r) {
+          //  var d = new Date(r.time);
+          //  return d.getHours().toString().padStart(2, '0') + ':' +
+          //    d.getMinutes().toString().padStart(2, '0');
+          
+          // THIS IS MAYBE COOKED BUT TRYING TO FIX CHART TIMESTAMPS WHICH WERE BUGGIN
+          return new Date(r.time).toLocaleTimeString('en-AU', {
+            timeZone: 'Australia/Brisbane',
+            hour: '2-digit', minute: '2-digit', hour12: true
+          });
+
+        });
+
+        function fillChart(chart, key, storageKey) {
+          chart.data.labels = labels.slice();
+          chart.data.datasets[0].data = rows.map(function (r) { return r[key]; });
+          chart.update('none');
+          if (storageKey) {
+            try {
+              sessionStorage.setItem(storageKey, JSON.stringify({
+                labels: chart.data.labels,
+                data: chart.data.datasets[0].data
+              }));
+            } catch (e) { }
+          }
+        }
+
+        fillChart(tempChart, 'temperature_c', 'chart_temp');
+        fillChart(humChart, 'humidity_pct', 'chart_hum');
+        fillChart(co2Chart, 'co2_ppm', 'chart_co2');
+        fillChart(aqiChart, 'aqi', 'chart_aqi');
+
+        /* update current + average values from latest row */
+        var latest = rows[rows.length - 1];
+        document.getElementById('temp-current').textContent = Number(latest.temperature_c).toFixed(1);
+        document.getElementById('hum-current').textContent = Math.round(Number(latest.humidity_pct));
+        document.getElementById('co2-current').textContent = Math.round(Number(latest.co2_ppm));
+        document.getElementById('aqi-current').textContent = Number(latest.aqi).toFixed(1);
+
+        var avg = data.averages || {};
+        if (avg.avg_temperature_c !== undefined)
+          document.getElementById('temp-avg').textContent = Number(avg.avg_temperature_c).toFixed(1);
+        if (avg.avg_humidity_pct !== undefined)
+          document.getElementById('hum-avg').textContent = Math.round(Number(avg.avg_humidity_pct));
+        if (avg.avg_co2_ppm !== undefined)
+          document.getElementById('co2-avg').textContent = Math.round(Number(avg.avg_co2_ppm));
+        if (avg.avg_aqi !== undefined)
+          document.getElementById('aqi-avg').textContent = Number(avg.avg_aqi).toFixed(1);
+      })
+      .catch(function (err) {
+        console.warn('Failed to load overview:', err);
+      });
+  }
+
+  loadOverview();
+  setInterval(loadOverview, 30000);
+</script>
+
+<script>
+  window.onReadingEvent = function (r) {
+    if (window.SITE_ID && r.site_id && r.site_id !== window.SITE_ID) return;
+
+    document.getElementById("temp-current").textContent =
+      Number(r.temperature_c).toFixed(1);
+    document.getElementById("hum-current").textContent =
+      Math.round(Number(r.humidity_pct));
+    document.getElementById("co2-current").textContent =
+      Math.round(Number(r.co2_ppm));
+    document.getElementById("aqi-current").textContent =
+      Number(r.aqi).toFixed(1);
+
+    document.getElementById("temp-avg").textContent =
+      Number(r.avg_temperature_c).toFixed(1);
+    document.getElementById("hum-avg").textContent =
+      Math.round(Number(r.avg_humidity_pct));
+    document.getElementById("co2-avg").textContent =
+      Math.round(Number(r.avg_co2_ppm));
+    document.getElementById("aqi-avg").textContent =
+      Number(r.avg_aqi).toFixed(1);
+
+    // THIS IS MAYBE COOKED BUT TRYING TO FIX CHART TIMESTAMPS WHICH WERE BUGGIN
+    const _d = new Date(r.timestamp);
+    //const time = _d.getHours().toString().padStart(2, '0') + ':' + _d.getMinutes().toString().padStart(2, '0');
+    const time = _d.toLocaleTimeString('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', minute: '2-digit', hour12: true
+    });
+
+    var sensor_map = {
+    "temp": { id: "card-temp", key: "temperature_c" },
+    "hum":  { id: "card-hum",  key: "humidity_pct"  },
+    "co2":  { id: "card-co2",  key: "co2_ppm"       },
+    "aqi":  { id: "card-aqi",  key: "aqi"           },
+    };
+
+
+
+    Object.values(sensor_map).forEach(function (s) {
+      var cards = document.getElementById(s.id);
+      var dots = cards.querySelector(".card-dot");
+      var statuses = cards.querySelector(".card-status");
+      var anomalyrange = r.sensor_anomalies && r.sensor_anomalies[s.key];
+
+
+      if (anomalyrange) {
+        cards.classList.add("anomaly");
+        dots.className = "card-dot bad";
+        statuses.textContent = "ANOMALY DETECTED";
+        statuses.classList.add("anomaly");
+      } else {
+        cards.classList.remove("anomaly");
+        dots.className = "card-dot ok";
+        //statuses.textContent = r.is_anomaly && (s.current < s.low || s.current > s.high) ? "ANOMALY ON OTHER SENSOR" : "NORMAL";
+        statuses.textContent = r.is_anomaly ? "ANOMALY ON OTHER SENSOR" : "NORMAL";
+        statuses.classList.remove("anomaly");
+      }
+    });
+
+
+
+    DataToChart(tempChart, time, r.temperature_c, 'chart_temp');
+    DataToChart(humChart, time, r.humidity_pct, 'chart_hum');
+    DataToChart(co2Chart, time, r.co2_ppm, 'chart_co2');
+    DataToChart(aqiChart, time, r.aqi, 'chart_aqi');
+
+    SaveDashboardState(
+      ['card-temp', 'card-hum', 'card-co2', 'card-aqi'],
+      ['temp-current', 'temp-avg', 'hum-current', 'hum-avg', 'co2-current', 'co2-avg', 'aqi-current', 'aqi-avg']
+    );
+
+    var danalysis = document.getElementById('modal-analysis');
+    var danalysismsg = document.getElementById('modal-analysis-msg');
+    var subtitle     = document.querySelector('.page-subtitle');
+    if (danalysis && danalysismsg) {
+      var msgs = r.analysis || [];
+      danalysis.style.display = msgs.length > 0 ? '' : 'none';
+      danalysismsg.textContent = msgs.length > 0 ? msgs[0] : '';
+      if (subtitle) subtitle.style.display = msgs.length > 0 ? 'none' : '';
+
+    }
+
+
+
+  };
+
+</script>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    initSiteSwitcher(
+      document.getElementById('site-switcher'),
+      {{ site_info.site_id | tojson if site_info else 'null' }},
+      '/dashboard'
+    );
+  });
+</script>
+
+{% endblock %}

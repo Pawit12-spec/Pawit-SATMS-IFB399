@@ -1,0 +1,32 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg18
+    container_name: project_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: "EQL SAM"
+    ports:
+      - "5432:5432"
+    volumes:
+      # Named volume (recommended on Windows; avoids slow/buggy C:\ bind mounts)
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d 'EQL SAM'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  influxdb:
+    image: influxdb:3-core
+    container_name: project_influxdb
+    ports:
+      - "8181:8181"
+    volumes:
+      - influxdata:/var/lib/influxdb3
+    command: serve --node-id node0 --object-store file --data-dir /var/lib/influxdb3 --log-filter warn --query-file-limit 2000
+
+volumes:
+  pgdata:
+  influxdata:

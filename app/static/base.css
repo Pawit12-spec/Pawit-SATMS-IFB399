@@ -1,0 +1,462 @@
+.home-bar {
+    position: relative;
+    align-items: center;
+    display: flex;
+    top: 0px;
+    left: 0px;
+    width: 100%;
+    height: 64px;
+    padding: 0 16px 0 4px;
+    background-color: var(--bg-header);
+    text-size-adjust: 100%;
+}
+
+.home-bar-right-section {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background-color: var(--bg-header);
+    margin-left: auto;
+    height: 64px;
+    gap: 14px;
+}
+
+.ellipse {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    background-color: var(--bg-avatar);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.side-bar-container {
+    flex: 0px 0px 220px;
+    transition: flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.side-bar {
+    position: sticky;
+    width: 220px;
+    height: calc(100vh - 64px);
+    background-color: var(--bg-sidebar);
+    border-radius: 1px;
+
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 220px;
+    transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.side-bar-menu,
+.side-bar-bottom-menu {
+    transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.menu-link {
+    transition: background-color 0.2s ease,
+                padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                gap 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.menu-link > span {
+    transition: opacity 0.18s ease;
+    white-space: nowrap;
+}
+
+.sidebar-collapse-toggle {
+    position: absolute;
+    top: 18px;
+    right: -12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--divider);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    z-index: 5;
+    transition: background 0.15s ease, color 0.15s ease,
+                border-color 0.15s ease, transform 0.15s ease;
+}
+
+.sidebar-collapse-toggle:hover {
+    background: var(--bg-header);
+    color: var(--text-on-brand);
+    border-color: var(--bg-header);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+    outline: 2px solid var(--bg-header);
+    outline-offset: 2px;
+}
+
+.sidebar-collapse-icon {
+    display: inline-block;
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 700;
+    transition: transform 0.22s ease;
+    transform: translateY(-1px);
+}
+
+[data-sidebar="collapsed"] .side-bar-container {
+    flex-basis: 64px;
+}
+
+[data-sidebar="collapsed"] .side-bar,
+[data-sidebar="collapsed"] .side-bar-menu,
+[data-sidebar="collapsed"] .side-bar-bottom-menu {
+    width: 64px;
+    flex-basis: 64px;
+}
+
+[data-sidebar="collapsed"] .menu-link {
+    justify-content: center;
+    padding: 0;
+    gap: 0;
+}
+
+[data-sidebar="collapsed"] .menu-link > span {
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    display: inline-block;
+}
+
+[data-sidebar="collapsed"] .sidebar-site-label,
+[data-sidebar="collapsed"] .sidebar-footer-text,
+[data-sidebar="collapsed"] .EQL-LOGO {
+    display: none;
+}
+
+[data-sidebar="collapsed"] .sidebar-collapse-icon {
+    transform: translateY(-1px) rotate(180deg);
+}
+
+.side-bar-menu {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    background-color: var(--bg-sidebar);
+}
+
+.menu-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 56px;
+    padding: 0 18px;
+
+    text-decoration: none;
+    color: var(--text-on-brand);
+    font-family: var(--font-heading);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.08px;
+    line-height: 15px;
+    outline: none;
+
+    transition: background-color 0.2s ease;
+}
+
+.menu-link.active {
+    background-color: var(--bg-sidebar-active);
+}
+
+.sidebar-site-label {
+    padding: 14px 18px 6px;
+    color: rgba(255, 255, 255, 0.6);
+    font-family: var(--font-heading);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+}
+
+.menu-link:focus,
+.menu-link:focus-visible,
+.menu-link:active {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.menu-link:active {
+    background-color: var(--bg-sidebar-active);
+}
+
+.menu-link:-moz-focusring {
+    outline: none !important;
+}
+
+.menu-link:focus-visible {
+    outline: none;
+}
+
+.EQL-LOGO {
+    margin-top: auto;
+    padding: 16px 18px 18px;
+    width: 100%;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.side-bar-bottom-menu {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    background-color: var(--bg-sidebar);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.side-bar-bottom-menu ~ .EQL-LOGO {
+    margin-top: 0;
+}
+
+.EQL-LOGO img {
+    display: block;
+    width: 184px;
+    height: auto;
+    max-width: 100%;
+    margin: 0 auto 14px;
+    opacity: 0.95;
+}
+
+.sidebar-footer-text {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    line-height: 1.5;
+    letter-spacing: 0.2px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.header-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: var(--text-on-brand);
+    margin-right: auto;
+    padding: 2px 10px 2px 2px;
+    border-radius: 10px;
+    transition: background 0.15s ease;
+}
+
+.header-brand:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.header-logo {
+    height: 48px;
+    width: auto;
+    display: block;
+    filter: brightness(0) invert(1);
+}
+
+.header-title {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    color: var(--text-on-brand);
+    font-size: 26px;
+    letter-spacing: -0.2px;
+    line-height: 1;
+}
+
+.theme-toggle {
+    position: relative;
+    width: 56px;
+    height: 28px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.3s, border-color 0.3s;
+}
+
+.theme-toggle:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    border-radius: 50%;
+    background: var(--text-on-brand);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s cubic-bezier(.4, .0, .2, 1);
+}
+
+[data-theme="dark"] #theme-toggle .toggle-knob {
+    transform: translateX(28px);
+}
+
+[data-colorblind="on"] #cb-toggle .toggle-knob {
+    transform: translateX(28px);
+}
+
+[data-theme="dark"] .menu-icon,
+[data-theme="dark"] .EQL-LOGO img {
+    filter: brightness(0.85);
+}
+
+.latency-indicator {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--text-on-brand);
+    background: rgba(255, 255, 255, 0.15);
+    padding: 6px 12px;
+    border-radius: 6px;
+}
+
+.latency-indicator.stale {
+    background: var(--dot-bad);
+    color: #fff;
+}
+
+.stale-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--dot-warn);
+    color: #000;
+    padding: 8px 16px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.user-menu {
+    position: relative;
+}
+
+.user-menu-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.user-menu-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.user-menu-name {
+    font-family: var(--font-heading);
+    font-size: 14px;
+    color: var(--text-on-brand);
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-menu .ellipse {
+    width: 36px;
+    height: 36px;
+    font-family: var(--font-heading);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--bg-header);
+    background: var(--bg-avatar);
+}
+
+.user-menu-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 180px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    z-index: 100;
+    overflow: hidden;
+}
+
+.user-menu.open .user-menu-dropdown {
+    display: block;
+}
+
+.user-menu-dropdown-header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.user-menu-dropdown-header .dropdown-name {
+    font-family: var(--font-heading);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.user-menu-dropdown-header .dropdown-email {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.user-menu-dropdown a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    font-family: var(--font-heading);
+    font-size: 14px;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.user-menu-dropdown a:hover {
+    background: var(--bg-page);
+}
+
+.user-menu-dropdown-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    font-family: var(--font-heading);
+    font-size: 14px;
+    color: var(--text-primary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.user-menu-dropdown-btn:hover {
+    background: var(--bg-page);
+}

@@ -1,0 +1,273 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Overview | Dashboard{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='overview.css') }}">
+{% endblock %}
+
+{% block content %}
+
+<div class="substation-data-overview overview-page">
+
+    <div class="overview-header">
+        <h1 class="overview-title">OVERVIEW <span class="overview-subtitle">/ ALL SUBSTATION ROOMS</span></h1>
+    </div>
+
+    <div class="overview-section" id="section-escalated">
+        <div class="section-label-pill escalated-pill">ESCALATED</div>
+        <div class="site-cards-row" id="escalated-cards">
+            {% for site in sites if site.escalated and not site.suppressed %}
+            <div class="site-card escalated-card" data-site-id="{{ site.site_id }}"
+                data-name="{{ site.name }}" data-region="{{ site.region or '' }}"
+                data-address="{{ site.address or 'Substation Room' }}" data-status="escalated"
+                data-last-reading="{{ site.last_reading or '--' }}">
+                <div class="site-card-id">{{ site.site_id[:8] }}</div>
+                <div class="site-card-name">{{ site.name }}</div>
+                <div class="site-card-region">{{ (site.region or site.address or '') | upper }}</div>
+                <div class="site-card-footer">
+                    <span class="site-status-badge badge-escalated">ESCALATED</span>
+                    <span class="site-card-time">{{ site.last_reading or '--' }}</span>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-section-msg">No escalated alerts</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- CRITICAL SECTION -->
+    <div class="overview-section" id="section-critical">
+        <div class="section-label-pill critical-pill">CRITICAL</div>
+        <div class="site-cards-row" id="critical-cards">
+            {% for site in sites if site.status == 'critical' and not site.suppressed %}
+            <div class="site-card critical-card" data-site-id="{{ site.site_id }}"
+                data-name="{{ site.name }}" data-region="{{ site.region or '' }}"
+                data-address="{{ site.address or 'Substation Room' }}" data-status="critical"
+                data-last-reading="{{ site.last_reading or '--' }}">
+                <div class="site-card-id">{{ site.site_id[:8] }}</div>
+                <div class="site-card-name">{{ site.name }}</div>
+                <div class="site-card-region">{{ (site.region or site.address or '') | upper }}</div>
+                <div class="site-card-footer">
+                    <span class="site-status-badge badge-critical">CRITICAL</span>
+                    <span class="site-card-time">{{ site.last_reading or '--' }}</span>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-section-msg">No critical sites</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- WARNING SECTION -->
+    <div class="overview-section" id="section-warning">
+        <div class="section-label-pill warning-pill">WARNING</div>
+        <div class="site-cards-row" id="warning-cards">
+            {% for site in sites if site.status == 'warning' and not site.suppressed %}
+            <div class="site-card warning-card" data-site-id="{{ site.site_id }}"
+                data-name="{{ site.name }}" data-region="{{ site.region or '' }}"
+                data-address="{{ site.address or 'Substation Room' }}" data-status="warning"
+                data-last-reading="{{ site.last_reading or '--' }}">
+                <div class="site-card-id">{{ site.site_id[:8] }}</div>
+                <div class="site-card-name">{{ site.name }}</div>
+                <div class="site-card-region">{{ (site.region or site.address or '') | upper }}</div>
+                <div class="site-card-footer">
+                    <span class="site-status-badge badge-warning">WARNING</span>
+                    <span class="site-card-time">{{ site.last_reading or '--' }}</span>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-section-msg">No warnings</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ALL SITES SECTION -->
+    <div class="overview-section" id="section-all">
+        <div class="all-section-header">
+            <div class="section-label-pill all-pill">ALL SITES</div>
+            <div class="overview-search-wrapper">
+                <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input type="text" id="site-search" class="overview-search-input" placeholder="Search" />
+            </div>
+        </div>
+
+        <div class="site-cards-grid" id="all-cards">
+            {% for site in sites %}
+            <div class="site-card {{ 'escalated-card' if site.status == 'escalated' else ('critical-card' if site.status == 'critical' else ('warning-card' if site.status == 'warning' else 'normal-card')) }}"
+                data-site-id="{{ site.site_id }}" data-name="{{ site.name }}"
+                data-region="{{ site.region or '' }}" data-address="{{ site.address or 'Substation Room' }}"
+                data-status="{{ site.status or 'normal' }}" data-last-reading="{{ site.last_reading or '--' }}"
+                data-suppressed-occurrence-count="{{ site.suppressed_occurrence_count or 0 }}">
+                <div class="site-card-id">{{ site.site_id[:8] }}</div>
+                <div class="site-card-name">{{ site.name }}</div>
+                <div class="site-card-region">{{ (site.region or site.address or '') | upper }}</div>
+                <div class="site-card-footer">
+                    <span class="site-status-badge badge-{{ site.status or 'normal' }}">{{ (site.status or 'NORMAL') | upper }}</span>
+                    <span class="site-card-time">{{ site.last_reading or '--' }}</span>
+                </div>
+                {% if site.suppressed and site.suppressed_occurrence_count > 0 %}
+                <div class="site-card-suppressed-count" title="Number of matching alerts suppressed during this review window">
+                    {{ site.suppressed_occurrence_count }} suppressed occurrence{{ 's' if site.suppressed_occurrence_count != 1 else '' }}
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="empty-section-msg">No sites configured. Add sites from the Assets page.</div>
+            {% endfor %}
+        </div>
+    </div>
+
+</div>
+
+<!-- ===== SITE DETAIL MODAL ===== -->
+<div class="site-modal-backdrop" id="site-modal-backdrop" aria-hidden="true"></div>
+<div class="site-modal-overlay" id="site-modal-overlay" aria-hidden="true">
+    <div class="site-modal" role="dialog" aria-modal="true">
+
+        <div class="site-modal-accent" id="modal-accent"></div>
+        <button class="site-modal-close" id="site-modal-close" aria-label="Close">&times;</button>
+
+        <div class="site-modal-header">
+            <div class="site-modal-id" id="modal-site-id"></div>
+            <div class="site-modal-name" id="modal-site-name"></div>
+            <div class="site-modal-location" id="modal-site-location"></div>
+        </div>
+
+        <div class="site-modal-sensors">
+            <div class="modal-sensor-card">
+                <div class="modal-sensor-header">
+                    <img src="{{ url_for('static', filename='img/thermometer-2-36x36.svg') }}" class="modal-sensor-icon" alt="" />
+                    <span class="modal-sensor-label">TEMPERATURE</span>
+                </div>
+                <div class="modal-sensor-value" id="modal-temp-current">--<span class="modal-sensor-unit">°C</span></div>
+                <div class="modal-sensor-avg" id="modal-temp-avg">AVG --°C</div>
+            </div>
+            <div class="modal-sensor-card">
+                <div class="modal-sensor-header">
+                    <img src="{{ url_for('static', filename='img/humidity-2-36x36.svg') }}" class="modal-sensor-icon" alt="" />
+                    <span class="modal-sensor-label">HUMIDITY</span>
+                </div>
+                <div class="modal-sensor-value" id="modal-hum-current">--<span class="modal-sensor-unit">%</span></div>
+                <div class="modal-sensor-avg" id="modal-hum-avg">AVG --%</div>
+            </div>
+            <div class="modal-sensor-card">
+                <div class="modal-sensor-header">
+                    <img src="{{ url_for('static', filename='img/co2-cloud-2-36x36.svg') }}" class="modal-sensor-icon" alt="" />
+                    <span class="modal-sensor-label">CO₂</span>
+                </div>
+                <div class="modal-sensor-value" id="modal-co2-current">--<span class="modal-sensor-unit">ppm</span></div>
+                <div class="modal-sensor-avg" id="modal-co2-avg">AVG -- ppm</div>
+            </div>
+            <div class="modal-sensor-card">
+                <div class="modal-sensor-header">
+                    <img src="{{ url_for('static', filename='img/wind-2-36x36.svg') }}" class="modal-sensor-icon" alt="" />
+                    <span class="modal-sensor-label">AIR QUALITY</span>
+                </div>
+                <div class="modal-sensor-value" id="modal-aqi-current">--<span class="modal-sensor-unit">µg/m³</span></div>
+                <div class="modal-sensor-avg" id="modal-aqi-avg">AVG -- µg/m³</div>
+            </div>
+        </div>
+
+        <div id="modal-analysis" class="site-modal-analysis" style="display:none;">
+            <div id="modal-analysis-msg" class="modal-alert-item modal-alert-warning">
+            </div>
+        </div>
+
+        <div class="site-modal-status-row">
+            <div class="site-modal-status-left">
+                <div class="modal-status-label">CURRENT STATUS</div>
+                <div class="modal-status-value">
+                    <span class="modal-status-dot" id="modal-status-dot"></span>
+                    <span class="modal-status-text" id="modal-status-text">NORMAL</span>
+                </div>
+            </div>
+
+            <div class="site-modal-status-right" id="modal-suppressed-occurrence-wrapper" style="display:none">
+                <div class="modal-status-label">SUPPRESSED OCCURRENCES</div>
+                <div class="modal-status-value modal-suppressed-count-value">
+                    <span id="modal-suppressed-occurrence-count">0</span>
+                    <span class="modal-suppressed-count-hint">alert(s) suppressed this window</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="site-modal-actions" id="modal-actions-default">
+            <button class="modal-btn-acknowledge" id="modal-btn-acknowledge">ACKNOWLEDGE ALERT</button>
+            <button class="modal-btn-view" id="modal-btn-view">VIEW FULL ROOM</button>
+            <button class="modal-btn-close-bottom" id="modal-btn-close-bottom">CLOSE</button>
+            <button class="modal-btn-close-bottom modal-btn-logs" id="modal-btn-logs">VIEW LOGS</button>
+        </div>
+
+        <div id="review-form-panel" class="review-panel">
+            <div class="review-panel-heading">
+                <span class="modal-sensor-label">REVIEW ANOMALY</span>
+            </div>
+            <div class="site-modal-sensors review-panel-fields">
+                <div class="modal-sensor-card">
+                    <label class="export-label" for="review-reviewer">REVIEWER</label>
+                    <input type="text" id="review-reviewer" class="export-date-input review-input-readonly" value="{{ session.get('full_name', '') }}" readonly />
+                </div>
+                <div class="modal-sensor-card">
+                    <label class="export-label" for="review-severity">SEVERITY</label>
+                    <select id="review-severity" class="export-date-input">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                    </select>
+                </div>
+                <div class="modal-sensor-card">
+                    <label class="export-label" for="review-timeout">SUPPRESS ALERTS FOR</label>
+                    <select id="review-timeout" class="export-date-input">
+                        <option value="0">No suppression</option>
+                        <option value="1">1 minute</option>
+                        <option value="15">15 minutes</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60" selected>1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="240">4 hours</option>
+                        <option value="480">8 hours</option>
+                        <option value="1440">24 hours</option>
+                    </select>
+                </div>
+                <div class="modal-sensor-card review-comment-card">
+                    <label class="export-label" for="review-comment">COMMENT</label>
+                    <textarea id="review-comment" class="export-date-input review-textarea" rows="3" placeholder="Describe the issue, actions taken, or observations…"></textarea>
+                </div>
+            </div>
+            <div class="review-panel-actions">
+                <button class="modal-btn-acknowledge" id="review-submit-btn">SUBMIT REVIEW</button>
+                <button class="modal-btn-close-bottom" id="review-cancel-btn">CANCEL</button>
+            </div>
+        </div>
+
+        <div id="review-log-panel" class="review-panel">
+            <div class="review-log-heading">
+                <span class="modal-sensor-label">REVIEW LOG</span>
+                <div class="review-log-heading-actions">
+                    {% if session.get('role') == 'asset_owner' %}
+                    <button class="modal-btn-acknowledge modal-btn-cancel-suppression" id="modal-btn-cancel-suppression">CANCEL SUPPRESSION</button>
+                    {% endif %}
+                    <button class="modal-btn-close-bottom modal-btn-sm" id="review-log-back">← BACK</button>
+                </div>
+            </div>
+            <div id="review-log-list" class="review-log-list">
+                <div class="empty-section-msg">Loading…</div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    window.OVERVIEW_SITES_DATA = {{ sites | tojson }};
+    window.OVERVIEW_USER_ROLE  = {{ session.get('role', '') | tojson }};
+    window.OVERVIEW_FULL_NAME  = {{ session.get('full_name', '') | tojson }};
+</script>
+<script src="{{ url_for('static', filename='overview.js') }}"></script>
+{% endblock %}

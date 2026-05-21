@@ -1,0 +1,92 @@
+@import url("https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css");
+* {
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0px;
+  padding: 0px;
+  height: 100%;
+  overflow: hidden;
+}
+/* a blue color as a generic focus style */
+button:focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline: -webkit-focus-ring-color auto 5px !important;
+}
+
+a {
+  text-decoration: none;
+}
+
+.export-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-section {
+  margin-top: 16px;
+  padding: 0 4px;
+}
+
+.export-label {
+  font-family: var(--font-heading, Helvetica);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary, #333);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.export-date-input {
+  background: var(--bg-page, #ececec);
+  border: 1.5px solid var(--divider, #e6e6e6);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--font-ui, Helvetica);
+  color: var(--text-primary, #000);
+  min-width: 170px;
+}
+
+.export-date-input:focus {
+  outline: none;
+  border-color: var(--bg-header, #009390);
+}
+
+.export-csv-btn {
+  background: var(--bg-header, #009390);
+  color: var(--text-on-brand, #fff);
+  border: none;
+  border-radius: 6px;
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-heading, Helvetica);
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.export-csv-btn:hover {
+  opacity: 0.9;
+}
+
+.export-csv-btn:active {
+  opacity: 0.8;
+}
+
+.table-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.thermal-export-controls {
+  margin-bottom: 14px;
+}

@@ -1,0 +1,894 @@
+{% extends "base.html" %}
+
+{% block title %}Administration | Dashboard{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='manage.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div id="manage-page-root"
+     class="substation-data-overview manage-page"
+     data-active-tab="{{ active_tab|default('users') }}"
+     data-assets-url="{{ url_for('main.get_all_assets') }}">
+  <span class="page-title">ADMINISTRATION</span>
+
+  {% if request.args.get('error') %}
+  <div class="users-alert users-alert-error" data-auto-dismiss="5000">{{ request.args.get('error') }}</div>
+  {% endif %}
+  {% if request.args.get('success') %}
+  <div class="users-alert users-alert-success" data-auto-dismiss="5000">{{ request.args.get('success') }}</div>
+  {% endif %}
+
+  <div class="manage-tabs" role="tablist" aria-label="Manage sections">
+    <button type="button"
+            class="manage-tab {% if active_tab|default('users') == 'users' %}is-active{% endif %}"
+            role="tab"
+            data-tab-target="users"
+            aria-selected="{{ 'true' if active_tab|default('users') == 'users' else 'false' }}"
+            aria-controls="manage-tab-users">
+      Users
+      <span class="manage-tab-count">{{ users | length }}</span>
+    </button>
+    <button type="button"
+            class="manage-tab {% if active_tab|default('users') == 'sites' %}is-active{% endif %}"
+            role="tab"
+            data-tab-target="sites"
+            aria-selected="{{ 'true' if active_tab|default('users') == 'sites' else 'false' }}"
+            aria-controls="manage-tab-sites">
+      Sites
+      <span class="manage-tab-count">{{ sites | length }}</span>
+    </button>
+  </div>
+
+  {# ---------- USERS TAB ---------- #}
+  <section id="manage-tab-users"
+           class="manage-tab-panel {% if active_tab|default('users') == 'users' %}is-active{% endif %}"
+           role="tabpanel"
+           aria-labelledby="manage-tab-users">
+    <div id="users-page-root" class="users-layout"
+         data-assets-url="{{ url_for('main.get_all_assets') }}">
+      <section class="card users-form-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Create New User</span>
+          </div>
+        </div>
+        <div class="card-divider"></div>
+        <form method="POST" action="{{ url_for('main.create_user') }}" class="users-form assets-form">
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Account Details</span>
+          </div>
+
+          <div class="login-field assets-field-full">
+            <label for="full_name">Full Name <span class="assets-required">*</span></label>
+            <input type="text" id="full_name" name="full_name" placeholder="e.g. Jane Doe" required />
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="email">Email <span class="assets-required">*</span></label>
+            <input type="email" id="email" name="email" placeholder="name@company.com" required />
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="phone_e164">Phone</label>
+            <input type="tel" id="phone_e164" name="phone_e164"
+                   placeholder="e.g. +61412345678"
+                   pattern="[+0-9 \-()]{8,20}"
+                   title="International format, 8-15 digits (formatting characters allowed)" />
+          </div>
+
+          <div class="login-field assets-field-full">
+            <label for="password">Password <span class="assets-required">*</span></label>
+            <input type="password" id="password" name="password" placeholder="At least 4 characters" required minlength="4" />
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="role">Role</label>
+            <select id="role" name="role" class="login-field-select">
+              <option value="user">User</option>
+              <option value="asset_owner">Asset Owner</option>
+            </select>
+          </div>
+
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Initial Site Access</span>
+          </div>
+          <div class="login-field assets-field-full create-user-assets-field">
+            <label for="create-user-assets-search">
+              Assign Sites
+              <span class="create-user-assets-count" id="create-user-assets-count">(0 selected)</span>
+            </label>
+            <div class="assets-picker create-user-assets-picker">
+              <div class="assets-picker-search">
+                <input type="search" id="create-user-assets-search"
+                       placeholder="Search sites&hellip;" autocomplete="off" />
+              </div>
+              <div class="assets-picker-list" id="create-user-assets-list" role="listbox" aria-multiselectable="true">
+                {% if sites %}
+                  {% for s in sites %}
+                  <label data-site-name="{{ s.name | lower }}">
+                    <input type="checkbox" name="site_ids" value="{{ s.site_id }}" />
+                    <span>{{ s.name }}</span>
+                  </label>
+                  {% endfor %}
+                {% else %}
+                  <p class="assets-picker-empty">No sites available yet</p>
+                {% endif %}
+              </div>
+              {% if sites %}
+              <div class="assets-picker-actions">
+                <button type="button" class="assets-picker-clear" id="create-user-assets-clear">Clear</button>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <button type="submit" class="login-btn assets-submit-btn">Create User</button>
+        </form>
+      </section>
+
+      <section class="card users-table-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Current Users</span>
+          </div>
+          <span class="users-count">{{ users | length }} user{{ 's' if users | length != 1 }}</span>
+        </div>
+        <div class="card-divider"></div>
+        <div class="users-table-scroll">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td>{{ u.full_name }}</td>
+              <td>{{ u.email }}</td>
+              <td>{{ ('+' ~ u.phone_e164) if u.phone_e164 else '—' }}</td>
+              <td>
+                {% if u.user_id != session.get('user_id') %}
+                <form method="POST" action="{{ url_for('main.update_role', user_id=u.user_id) }}" class="users-role-form">
+                  <select name="role" class="users-role-select" onchange="this.form.submit()">
+                    <option value="user" {{ 'selected' if u.role == 'user' }}>User</option>
+                    <option value="asset_owner" {{ 'selected' if u.role == 'asset_owner' }}>Asset Owner</option>
+                  </select>
+                </form>
+                {% else %}
+                <span class="users-role-badge owner">Asset Owner</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="users-status {{ 'active' if u.is_active else 'inactive' }}">
+                  {{ 'Active' if u.is_active else 'Inactive' }}
+                </span>
+              </td>
+              <td class="users-actions-cell">
+                {% if u.user_id != session.get('user_id') %}
+                <div class="users-row-actions">
+                  <button type="button"
+                          class="user-edit-btn"
+                          data-user-id="{{ u.user_id }}"
+                          data-full-name="{{ u.full_name }}"
+                          data-email="{{ u.email }}"
+                          data-phone="{{ u.phone_e164 or '' }}"
+                          data-role="{{ u.role }}"
+                          data-submit-url="{{ url_for('main.update_user', user_id=u.user_id) }}"
+                          data-assets-url="{{ url_for('main.get_user_assets', user_id=u.user_id) }}"
+                          data-assign-url="{{ url_for('main.update_user_assets', user_id=u.user_id) }}"
+                          data-remove-url="{{ url_for('main.remove_user_asset', user_id=u.user_id) }}">
+                    Edit
+                  </button>
+                  <form method="POST" action="{{ url_for('main.delete_user', user_id=u.user_id) }}"
+                        onsubmit="return confirm('Delete {{ u.full_name }}?')">
+                    <button type="submit" class="users-delete-btn">Delete</button>
+                  </form>
+                </div>
+                {% else %}
+                <span class="users-you-label">You</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not users %}
+            <tr><td colspan="6" class="users-empty">No users found</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  {# ---------- SITES TAB ---------- #}
+  <section id="manage-tab-sites"
+           class="manage-tab-panel {% if active_tab|default('users') == 'sites' %}is-active{% endif %}"
+           role="tabpanel"
+           aria-labelledby="manage-tab-sites">
+    <div id="assets-page-root" class="users-layout">
+      <section class="card users-form-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Create New Site</span>
+          </div>
+        </div>
+        <div class="card-divider"></div>
+        <form method="POST" action="{{ url_for('main.create_asset') }}" class="users-form assets-form">
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Site Details</span>
+          </div>
+
+          <div class="login-field assets-field-full">
+            <label for="name">Site Name <span class="assets-required">*</span></label>
+            <input type="text" id="name" name="name" placeholder="e.g. Main Substation" required />
+          </div>
+          <div class="login-field">
+            <label for="room_name">Room Name</label>
+            <input type="text" id="room_name" name="room_name" placeholder="Optional" />
+          </div>
+          <div class="login-field">
+            <label for="region">Region</label>
+            <input type="text" id="region" name="region" placeholder="Optional" />
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="address">Address</label>
+            <input type="text" id="address" name="address" placeholder="Street, City, State" />
+          </div>
+          <div class="login-field">
+            <label for="latitude">Latitude</label>
+            <input type="number" id="latitude" name="latitude" step="0.000001" min="-90" max="90" placeholder="-90 to 90" />
+          </div>
+          <div class="login-field">
+            <label for="longitude">Longitude</label>
+            <input type="number" id="longitude" name="longitude" step="0.000001" min="-180" max="180" placeholder="-180 to 180" />
+          </div>
+
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Escalation Policy</span>
+          </div>
+
+          <label class="assets-toggle assets-field-full" for="escalation_enabled">
+            <input type="checkbox" id="escalation_enabled" name="escalation_enabled" value="on" />
+            <span class="assets-toggle-track" aria-hidden="true"><span class="assets-toggle-thumb"></span></span>
+            <span class="assets-toggle-text">
+              <span class="assets-toggle-title">Enable Escalation</span>
+              <span class="assets-toggle-sub">Notify a secondary contact if alerts go unacknowledged</span>
+            </span>
+          </label>
+
+          <div class="login-field">
+            <label for="escalation_timeout_minutes">Escalate After</label>
+            <div class="assets-input-suffix">
+              <input type="number" id="escalation_timeout_minutes" name="escalation_timeout_minutes"
+                     min="1" max="1440" value="30" />
+              <span class="assets-input-suffix-text">min</span>
+            </div>
+          </div>
+          <div class="login-field">
+            <label for="secondary_contact_user_id">Secondary Contact</label>
+            <select id="secondary_contact_user_id" name="secondary_contact_user_id">
+              <option value="">— None —</option>
+              {% for c in contacts %}
+              <option value="{{ c.user_id }}">{{ c.full_name }}{% if c.email %} ({{ c.email }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <button type="submit" class="login-btn assets-submit-btn">Create Site</button>
+        </form>
+      </section>
+
+      <section class="card users-table-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Current Sites</span>
+          </div>
+          <span class="users-count">{{ sites | length }} site{{ 's' if sites | length != 1 }}</span>
+        </div>
+        <div class="card-divider"></div>
+        <div class="assets-table-wrap">
+          <table class="users-table assets-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Room</th>
+                <th>Region</th>
+                <th>Address</th>
+                <th>Coordinates</th>
+                <th>Escalation</th>
+                <th>Secondary Contact</th>
+                <th class="assets-actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in sites %}
+              <tr>
+                <td><span class="assets-site-name">{{ s.name }}</span></td>
+                <td>{{ s.room_name or '—' }}</td>
+                <td>{{ s.region or '—' }}</td>
+                <td class="assets-cell-truncate" title="{{ s.address or '' }}">{{ s.address or '—' }}</td>
+                <td>
+                  {% if s.latitude is not none and s.longitude is not none %}
+                    <span class="assets-coords">{{ '%.4f'|format(s.latitude) }}, {{ '%.4f'|format(s.longitude) }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if s.escalation_enabled %}
+                    <span class="site-status-badge badge-warning">On · {{ s.escalation_timeout_minutes }}m</span>
+                  {% else %}
+                    <span class="site-status-badge badge-normal">Off</span>
+                  {% endif %}
+                </td>
+                <td>{{ s.secondary_contact_name or '—' }}</td>
+                <td>
+                  <div class="assets-row-actions">
+                    <button type="button" class="user-edit-btn asset-edit-btn"
+                            data-id="{{ s.site_id }}"
+                            data-name="{{ s.name }}"
+                            data-room="{{ s.room_name or '' }}"
+                            data-region="{{ s.region or '' }}"
+                            data-address="{{ s.address or '' }}"
+                            data-lat="{{ s.latitude if s.latitude is not none else '' }}"
+                            data-lng="{{ s.longitude if s.longitude is not none else '' }}"
+                            data-esc-enabled="{{ '1' if s.escalation_enabled else '0' }}"
+                            data-esc-timeout="{{ s.escalation_timeout_minutes }}"
+                            data-esc-contact="{{ s.secondary_contact_user_id }}">
+                      Edit
+                    </button>
+                    <form method="POST" action="{{ url_for('main.delete_asset', site_id=s.site_id) }}"
+                          onsubmit="return confirm('Delete site {{ s.name }}?')">
+                      <button type="submit" class="users-delete-btn">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% if not sites %}
+              <tr><td colspan="8" class="users-empty">No sites found</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  {# ---------- USER EDIT MODAL ---------- #}
+  <div class="users-edit-backdrop" id="users-edit-backdrop" aria-hidden="true"></div>
+  <div class="users-edit-overlay" id="users-edit-overlay" aria-hidden="true">
+    <div class="users-edit-modal" role="dialog" aria-modal="true" aria-labelledby="users-edit-title">
+      <button type="button" class="users-edit-close" id="users-edit-close" aria-label="Close edit form">&times;</button>
+      <h3 class="users-edit-title" id="users-edit-title">Edit User</h3>
+      <div class="users-edit-modal-content">
+        <div class="users-edit-details">
+          <form method="POST" class="users-form users-edit-form assets-form" id="users-edit-form">
+            <input type="hidden" name="user_id" id="edit-user-id" />
+            <div class="assets-form-section">
+              <span class="assets-form-section-title">Account Details</span>
+            </div>
+            <div class="login-field assets-field-full">
+              <label for="edit-full-name">Full Name <span class="assets-required">*</span></label>
+              <input type="text" id="edit-full-name" name="full_name" required />
+            </div>
+            <div class="login-field assets-field-full">
+              <label for="edit-email">Email <span class="assets-required">*</span></label>
+              <input type="email" id="edit-email" name="email" required />
+            </div>
+            <div class="login-field assets-field-full">
+              <label for="edit-phone">Phone</label>
+              <input type="tel" id="edit-phone" name="phone_e164"
+                     placeholder="e.g. +61412345678"
+                     pattern="[+0-9 \-()]{8,20}"
+                     title="International format, 8-15 digits (formatting characters allowed)" />
+            </div>
+            <div class="assets-form-section">
+              <span class="assets-form-section-title">Access</span>
+            </div>
+            <div class="login-field assets-field-full">
+              <label for="edit-role">Role</label>
+              <select id="edit-role" name="role" class="login-field-select">
+                <option value="user">User</option>
+                <option value="asset_owner">Asset Owner</option>
+              </select>
+            </div>
+            <div class="users-edit-actions assets-field-full">
+              <button type="button" class="users-edit-cancel-btn" id="users-edit-cancel">Cancel</button>
+              <button type="submit" class="login-btn">Save Changes</button>
+            </div>
+          </form>
+        </div>
+        <div class="users-edit-vertical-divider" aria-hidden="true"></div>
+        <div class="update-assets">
+          <div class="assets-picker">
+            <div class="assets-picker-header">
+              <label class="assets-picker-label" for="user-assets-search">Assign Assets</label>
+              <span class="assets-picker-count" id="user-assets-count">0 selected</span>
+            </div>
+            <div class="assets-picker-search">
+              <input type="search" id="user-assets-search" placeholder="Search sites&hellip;" autocomplete="off" />
+            </div>
+            <div class="assets-picker-list" id="user-assets-list" role="listbox" aria-multiselectable="true">
+              <p class="assets-picker-empty">Loading assets&hellip;</p>
+            </div>
+            <div class="assets-picker-actions">
+              <button type="button" class="assets-picker-clear" id="user-assets-clear">Clear</button>
+              <button type="button" class="asset-submit-btn" disabled>Assign Selected</button>
+            </div>
+          </div>
+          <div class="assets-assigned">
+            <div class="assets-assigned-header">
+              <span class="assets-assigned-title">Assigned Assets</span>
+              <span class="assets-assigned-count" id="user-assets-assigned-count">0</span>
+            </div>
+            <div class="assets-assigned-list" id="user-assets-table-body">
+              <p class="assets-picker-empty">Select a user to view assets</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ---------- ASSET EDIT MODAL ---------- #}
+  <div class="users-edit-backdrop" id="assets-edit-backdrop" aria-hidden="true"></div>
+  <div class="users-edit-overlay" id="assets-edit-overlay" aria-hidden="true">
+    <div class="assets-edit-modal" role="dialog" aria-modal="true" aria-labelledby="assets-edit-title">
+      <button type="button" class="users-edit-close" id="assets-edit-close" aria-label="Close edit form">&times;</button>
+      <h3 id="assets-edit-title">Edit Site</h3>
+      <form id="edit-form" method="POST" class="users-edit-form assets-form">
+        <div class="assets-form-section">
+          <span class="assets-form-section-title">Site Details</span>
+        </div>
+
+        <div class="login-field assets-field-full">
+          <label for="edit-name">Site Name <span class="assets-required">*</span></label>
+          <input type="text" name="name" id="edit-name" required />
+        </div>
+        <div class="login-field">
+          <label for="edit-room_name">Room Name</label>
+          <input type="text" name="room_name" id="edit-room_name" />
+        </div>
+        <div class="login-field">
+          <label for="edit-region">Region</label>
+          <input type="text" name="region" id="edit-region" />
+        </div>
+        <div class="login-field assets-field-full">
+          <label for="edit-address">Address</label>
+          <input type="text" name="address" id="edit-address" />
+        </div>
+        <div class="login-field">
+          <label for="edit-latitude">Latitude</label>
+          <input type="number" name="latitude" id="edit-latitude" step="0.000001" min="-90" max="90" />
+        </div>
+        <div class="login-field">
+          <label for="edit-longitude">Longitude</label>
+          <input type="number" name="longitude" id="edit-longitude" step="0.000001" min="-180" max="180" />
+        </div>
+
+        <div class="assets-form-section">
+          <span class="assets-form-section-title">Escalation Policy</span>
+        </div>
+
+        <label class="assets-toggle assets-field-full" for="edit-escalation_enabled">
+          <input type="checkbox" id="edit-escalation_enabled" name="escalation_enabled" value="on" />
+          <span class="assets-toggle-track" aria-hidden="true"><span class="assets-toggle-thumb"></span></span>
+          <span class="assets-toggle-text">
+            <span class="assets-toggle-title">Enable Escalation</span>
+            <span class="assets-toggle-sub">Notify a secondary contact if alerts go unacknowledged</span>
+          </span>
+        </label>
+
+        <div class="login-field">
+          <label for="edit-escalation_timeout_minutes">Escalate After</label>
+          <div class="assets-input-suffix">
+            <input type="number" name="escalation_timeout_minutes" id="edit-escalation_timeout_minutes"
+                   min="1" max="1440" value="30" />
+            <span class="assets-input-suffix-text">min</span>
+          </div>
+        </div>
+        <div class="login-field">
+          <label for="edit-secondary_contact_user_id">Secondary Contact</label>
+          <select name="secondary_contact_user_id" id="edit-secondary_contact_user_id">
+            <option value="">— None —</option>
+            {% for c in contacts %}
+            <option value="{{ c.user_id }}">{{ c.full_name }}{% if c.email %} ({{ c.email }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="users-edit-actions assets-field-full">
+          <button type="button" class="users-edit-cancel-btn" id="assets-edit-cancel">Cancel</button>
+          <button type="submit" class="login-btn">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ---------- Auto-dismiss flash alerts ----------
+  (function() {
+    var alerts = document.querySelectorAll('.users-alert[data-auto-dismiss]');
+    if (!alerts.length) return;
+    alerts.forEach(function(el) {
+      var delay = parseInt(el.dataset.autoDismiss, 10) || 5000;
+      setTimeout(function() {
+        el.style.transition = 'opacity 0.4s ease';
+        el.style.opacity = '0';
+        setTimeout(function() { el.remove(); }, 450);
+      }, delay);
+    });
+    // Strip ?success / ?error from URL so a refresh doesn't re-show the banner.
+    if (window.history && window.history.replaceState) {
+      try {
+        var url = new URL(window.location.href);
+        var changed = false;
+        ['success', 'error'].forEach(function(k) {
+          if (url.searchParams.has(k)) { url.searchParams.delete(k); changed = true; }
+        });
+        if (changed) window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : '') + url.hash);
+      } catch (e) { /* noop */ }
+    }
+  })();
+
+  // ---------- Create User: site picker ----------
+  (function() {
+    var listEl = document.getElementById('create-user-assets-list');
+    if (!listEl) return;
+    var searchEl = document.getElementById('create-user-assets-search');
+    var countEl = document.getElementById('create-user-assets-count');
+    var clearBtn = document.getElementById('create-user-assets-clear');
+    var labels = Array.prototype.slice.call(listEl.querySelectorAll('label[data-site-name]'));
+
+    function updateCount() {
+      var n = listEl.querySelectorAll('input[type="checkbox"]:checked').length;
+      if (countEl) countEl.textContent = '(' + n + ' selected)';
+    }
+    listEl.addEventListener('change', updateCount);
+
+    if (searchEl) {
+      searchEl.addEventListener('input', function() {
+        var q = (searchEl.value || '').trim().toLowerCase();
+        labels.forEach(function(lb) {
+          lb.style.display = (!q || lb.dataset.siteName.indexOf(q) !== -1) ? '' : 'none';
+        });
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function() {
+        listEl.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+        updateCount();
+      });
+    }
+    updateCount();
+  })();
+
+  // ---------- Tabs ----------
+  (function() {
+    var root = document.getElementById('manage-page-root');
+    if (!root) return;
+    var tabs = root.querySelectorAll('.manage-tab');
+    var panels = root.querySelectorAll('.manage-tab-panel');
+    function activate(name) {
+      tabs.forEach(function(t) {
+        var active = t.dataset.tabTarget === name;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      panels.forEach(function(p) {
+        p.classList.toggle('is-active', p.id === 'manage-tab-' + name);
+      });
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set('tab', name);
+        window.history.replaceState({}, '', url);
+      } catch (e) {}
+    }
+    tabs.forEach(function(t) {
+      t.addEventListener('click', function() { activate(t.dataset.tabTarget); });
+    });
+    var qs = new URLSearchParams(window.location.search);
+    var initial = qs.get('tab') || root.dataset.activeTab || 'users';
+    if (initial !== 'users' && initial !== 'sites') initial = 'users';
+    activate(initial);
+  })();
+
+  // ---------- Users edit modal ----------
+  (function() {
+    var root = document.getElementById('users-page-root');
+    var pageRoot = document.getElementById('manage-page-root');
+    if (!root || !pageRoot) return;
+
+    var overlay = document.getElementById('users-edit-overlay');
+    var backdrop = document.getElementById('users-edit-backdrop');
+    var form = document.getElementById('users-edit-form');
+    var title = document.getElementById('users-edit-title');
+    var assetsListEl = document.getElementById('user-assets-list');
+    var assetsSearchEl = document.getElementById('user-assets-search');
+    var assetsCountEl = document.getElementById('user-assets-count');
+    var assetsClearBtn = document.getElementById('user-assets-clear');
+    var assignedListEl = document.getElementById('user-assets-table-body');
+    var assignedCountEl = document.getElementById('user-assets-assigned-count');
+    var assetSubmitBtn = overlay.querySelector('.asset-submit-btn');
+    var assetsEndpoint = root.dataset.assetsUrl || '';
+    var allAssetsData = [];
+    var assignedAssetIds = {};
+    var selectedAssetIds = {};
+    var currentAssetsAssignUrl = null;
+    var currentUserAssetsUrl = null;
+    var currentAssetsRemoveUrl = null;
+
+    function getAssetName(asset) { return asset && (asset.asset_name || asset.name || 'Unnamed Asset'); }
+    function getAssetId(asset) { return asset && (asset.asset_id || asset.site_id || ''); }
+
+    var inputs = {
+      userId: document.getElementById('edit-user-id'),
+      name: document.getElementById('edit-full-name'),
+      email: document.getElementById('edit-email'),
+      phone: document.getElementById('edit-phone'),
+      role: document.getElementById('edit-role')
+    };
+    var closeBtn = document.getElementById('users-edit-close');
+    var cancelBtn = document.getElementById('users-edit-cancel');
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+    function selectedCount() {
+      var n = 0;
+      for (var k in selectedAssetIds) if (selectedAssetIds[k]) n++;
+      return n;
+    }
+    function updateSubmitState() {
+      var n = selectedCount();
+      if (assetsCountEl) assetsCountEl.textContent = n + ' selected';
+      if (assetSubmitBtn) {
+        assetSubmitBtn.disabled = n === 0;
+        assetSubmitBtn.textContent = n > 1 ? ('Assign ' + n + ' Assets') : 'Assign Selected';
+      }
+    }
+    function renderAssetsList() {
+      if (!assetsListEl) return;
+      var filter = (assetsSearchEl && assetsSearchEl.value || '').trim().toLowerCase();
+      var available = allAssetsData.filter(function(a) {
+        var id = getAssetId(a);
+        return id && !assignedAssetIds[id];
+      });
+      var filtered = filter
+        ? available.filter(function(a) { return getAssetName(a).toLowerCase().indexOf(filter) !== -1; })
+        : available;
+      if (!available.length) {
+        assetsListEl.innerHTML = '<p class="assets-picker-empty">All available assets are assigned</p>';
+        return;
+      }
+      if (!filtered.length) {
+        assetsListEl.innerHTML = '<p class="assets-picker-empty">No matches</p>';
+        return;
+      }
+      assetsListEl.innerHTML = filtered.map(function(a) {
+        var id = getAssetId(a);
+        var name = getAssetName(a);
+        var checked = selectedAssetIds[id] ? ' checked' : '';
+        return '<label class="assets-picker-item' + (checked ? ' is-selected' : '') + '">' +
+          '<input type="checkbox" value="' + escapeHtml(id) + '"' + checked + '>' +
+          '<span class="assets-picker-item-name">' + escapeHtml(name) + '</span>' +
+        '</label>';
+      }).join('');
+    }
+    function renderAssignedList(assets) {
+      if (!assignedListEl) return;
+      assignedAssetIds = {};
+      if (!assets || !assets.length) {
+        assignedListEl.innerHTML = '<p class="assets-picker-empty">No assets assigned</p>';
+        if (assignedCountEl) assignedCountEl.textContent = '0';
+        renderAssetsList();
+        return;
+      }
+      assets.forEach(function(a) {
+        var id = a.asset_id;
+        if (id) assignedAssetIds[id] = true;
+      });
+      assignedListEl.innerHTML = assets.map(function(asset) {
+        var id = asset.asset_id;
+        var name = asset.asset_name;
+        return '<div class="assets-assigned-row">' +
+          '<span class="assets-assigned-name" title="' + escapeHtml(id) + '">' + escapeHtml(name) + '</span>' +
+          '<button type="button" class="asset-remove-btn" aria-label="Remove ' + escapeHtml(name) + '" data-asset-id="' + escapeHtml(id) + '" data-asset-name="' + escapeHtml(name) + '">&times;</button>' +
+        '</div>';
+      }).join('');
+      if (assignedCountEl) assignedCountEl.textContent = String(assets.length);
+      Object.keys(selectedAssetIds).forEach(function(id) {
+        if (assignedAssetIds[id]) delete selectedAssetIds[id];
+      });
+      renderAssetsList();
+      updateSubmitState();
+    }
+    function setAssignedLoading(message) {
+      if (!assignedListEl) return;
+      assignedListEl.innerHTML = '<p class="assets-picker-empty">' + escapeHtml(message) + '</p>';
+    }
+    function setPickerEmpty(message) {
+      if (!assetsListEl) return;
+      assetsListEl.innerHTML = '<p class="assets-picker-empty">' + escapeHtml(message) + '</p>';
+    }
+    function fetchAllAssets() {
+      if (!assetsEndpoint) { setPickerEmpty('No assets endpoint configured'); return; }
+      fetch(assetsEndpoint, { headers: { 'Accept': 'application/json' } })
+        .then(function(res) { if (!res.ok) throw new Error(); return res.json(); })
+        .then(function(data) {
+          allAssetsData = data && Array.isArray(data.assets) ? data.assets : [];
+          allAssetsData.sort(function(a, b) { return getAssetName(a).localeCompare(getAssetName(b)); });
+          renderAssetsList();
+        })
+        .catch(function() { allAssetsData = []; setPickerEmpty('Unable to load assets'); });
+    }
+    function loadUserAssets(url) {
+      if (!url) return;
+      setAssignedLoading('Loading assets…');
+      fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(res) { if (!res.ok) throw new Error(); return res.json(); })
+        .then(function(data) { renderAssignedList(data && data.assets ? data.assets : []); })
+        .catch(function() { setAssignedLoading('Unable to load assets'); });
+    }
+    function openModal(btn) {
+      inputs.userId.value = btn.dataset.userId || '';
+      inputs.name.value = btn.dataset.fullName || '';
+      inputs.email.value = btn.dataset.email || '';
+      if (inputs.phone) {
+        var phoneVal = btn.dataset.phone || '';
+        inputs.phone.value = phoneVal ? ('+' + phoneVal) : '';
+      }
+      inputs.role.value = btn.dataset.role || 'user';
+      form.action = btn.dataset.submitUrl || '';
+      currentAssetsAssignUrl = btn.dataset.assignUrl || '';
+      currentUserAssetsUrl = btn.dataset.assetsUrl || '';
+      currentAssetsRemoveUrl = btn.dataset.removeUrl || '';
+      selectedAssetIds = {};
+      if (assetsSearchEl) assetsSearchEl.value = '';
+      updateSubmitState();
+      title.textContent = btn.dataset.fullName ? 'Edit ' + btn.dataset.fullName : 'Edit User';
+      loadUserAssets(currentUserAssetsUrl);
+      overlay.setAttribute('aria-hidden', 'false');
+      pageRoot.classList.add('users-edit-open');
+    }
+    function closeModal() {
+      overlay.setAttribute('aria-hidden', 'true');
+      pageRoot.classList.remove('users-edit-open');
+      form.reset();
+    }
+
+    root.querySelectorAll('.user-edit-btn').forEach(function(btn) {
+      if (btn.classList.contains('asset-edit-btn')) return;
+      btn.addEventListener('click', function() { openModal(btn); });
+    });
+
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', function(e) { e.preventDefault(); closeModal(); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeModal(); });
+    if (backdrop) backdrop.addEventListener('click', closeModal);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && pageRoot.classList.contains('users-edit-open')) closeModal();
+    });
+
+    if (assetsSearchEl) assetsSearchEl.addEventListener('input', renderAssetsList);
+    if (assetsListEl) {
+      assetsListEl.addEventListener('change', function(e) {
+        var input = e.target.closest('input[type="checkbox"]');
+        if (!input) return;
+        var id = input.value;
+        if (input.checked) selectedAssetIds[id] = true; else delete selectedAssetIds[id];
+        var label = input.closest('.assets-picker-item');
+        if (label) label.classList.toggle('is-selected', input.checked);
+        updateSubmitState();
+      });
+    }
+    if (assetsClearBtn) {
+      assetsClearBtn.addEventListener('click', function() {
+        selectedAssetIds = {};
+        renderAssetsList();
+        updateSubmitState();
+      });
+    }
+    if (assetSubmitBtn) {
+      assetSubmitBtn.addEventListener('click', function() {
+        if (!currentAssetsAssignUrl) return;
+        var ids = Object.keys(selectedAssetIds).filter(function(k) { return selectedAssetIds[k]; });
+        if (!ids.length) return;
+        assetSubmitBtn.disabled = true;
+        assetSubmitBtn.textContent = 'Saving…';
+        Promise.all(ids.map(function(id) {
+          return fetch(currentAssetsAssignUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ asset_id: id })
+          }).then(function(res) { if (!res.ok) throw new Error(); return res.json(); });
+        }))
+        .then(function() {
+          selectedAssetIds = {};
+          if (currentUserAssetsUrl) loadUserAssets(currentUserAssetsUrl);
+        })
+        .catch(function() { setAssignedLoading('Unable to update assets'); })
+        .finally(function() { updateSubmitState(); });
+      });
+    }
+    if (assignedListEl) {
+      assignedListEl.addEventListener('click', function(e) {
+        var btn = e.target.closest('.asset-remove-btn');
+        if (!btn) return;
+        var assetId = btn.dataset.assetId;
+        if (!assetId || !currentAssetsRemoveUrl) return;
+        btn.disabled = true;
+        fetch(currentAssetsRemoveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ asset_id: assetId })
+        })
+        .then(function(res) { if (!res.ok) throw new Error(); return res.json(); })
+        .then(function() { if (currentUserAssetsUrl) loadUserAssets(currentUserAssetsUrl); })
+        .catch(function() { btn.disabled = false; });
+      });
+    }
+    fetchAllAssets();
+  })();
+
+  // ---------- Asset edit modal ----------
+  (function() {
+    var pageRoot = document.getElementById('manage-page-root');
+    var overlay = document.getElementById('assets-edit-overlay');
+    var backdrop = document.getElementById('assets-edit-backdrop');
+    var form = document.getElementById('edit-form');
+    if (!pageRoot || !overlay || !form) return;
+
+    function openEditModal(id, name, room, region, address, lat, lng, escEnabled, escTimeout, escContact) {
+      form.action = '/assets/' + id + '/edit';
+      document.getElementById('edit-name').value = name;
+      document.getElementById('edit-room_name').value = room;
+      document.getElementById('edit-region').value = region;
+      document.getElementById('edit-address').value = address;
+      document.getElementById('edit-latitude').value = lat;
+      document.getElementById('edit-longitude').value = lng;
+      document.getElementById('edit-escalation_enabled').checked = (escEnabled === '1' || escEnabled === true);
+      document.getElementById('edit-escalation_timeout_minutes').value = escTimeout || 30;
+      document.getElementById('edit-secondary_contact_user_id').value = escContact || '';
+      overlay.setAttribute('aria-hidden', 'false');
+      pageRoot.classList.add('assets-edit-open');
+    }
+    function closeEditModal() {
+      overlay.setAttribute('aria-hidden', 'true');
+      pageRoot.classList.remove('assets-edit-open');
+    }
+
+    document.querySelectorAll('.asset-edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        openEditModal(
+          this.dataset.id, this.dataset.name, this.dataset.room,
+          this.dataset.region, this.dataset.address,
+          this.dataset.lat, this.dataset.lng,
+          this.dataset.escEnabled, this.dataset.escTimeout, this.dataset.escContact
+        );
+      });
+    });
+    document.getElementById('assets-edit-close').addEventListener('click', closeEditModal);
+    document.getElementById('assets-edit-cancel').addEventListener('click', function(e) {
+      e.preventDefault();
+      closeEditModal();
+    });
+    if (backdrop) backdrop.addEventListener('click', closeEditModal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeEditModal(); });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && pageRoot.classList.contains('assets-edit-open')) closeEditModal();
+    });
+  })();
+</script>
+{% endblock %}

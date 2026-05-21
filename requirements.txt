@@ -1,0 +1,25 @@
+Flask>=2.0
+psycopg2-binary>=2.9
+Pillow>=10.4.0
+pytest
+pytest-mock
+requests
+python-dotenv>=1.0
+influxdb3-python>=0.7
+pandas
+urllib3
+
+
+#iso ml 
+scikit-learn
+joblib
+
+#image ml
+torch
+torchvision
+opencv-python
+
+#notifications
+twilio
+resend
+

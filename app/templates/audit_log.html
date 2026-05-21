@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Audit Log | Dashboard{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='manage.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='audit.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="substation-data-overview audit-page">
+  <span class="page-title">AUDIT LOG</span>
+
+  <div class="users-layout audit-layout">
+    <section class="card users-table-card audit-card">
+      <div class="card-top">
+        <div class="card-title">
+          <span class="users-card-heading">Events</span>
+        </div>
+        <span class="users-count">{{ rows | length }} entr{{ 'ies' if rows | length != 1 else 'y' }}</span>
+      </div>
+      <div class="card-divider"></div>
+
+      <div class="audit-table-scroll">
+        <table class="users-table audit-table">
+          <thead>
+            <tr>
+              <th class="audit-col-id">#</th>
+              <th class="audit-col-user">Performed By</th>
+              <th class="audit-col-action">Action</th>
+              <th class="audit-col-time">Time</th>
+              <th class="audit-col-changes">Settings Before</th>
+              <th class="audit-col-changes">Settings After</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            {% set act = row.action_taken | lower %}
+            {% if 'delete' in act or 'remove' in act %}{% set badge = 'audit-badge-delete' %}
+            {% elif 'create' in act or 'add' in act %}{% set badge = 'audit-badge-create' %}
+            {% elif 'login' in act or 'logout' in act %}{% set badge = 'audit-badge-auth' %}
+            {% else %}{% set badge = 'audit-badge-update' %}{% endif %}
+            <tr>
+              <td class="audit-id">#{{ row.action_id }}</td>
+              <td class="audit-user">{{ row.action_user_name }}</td>
+              <td><span class="audit-badge {{ badge }}">{{ row.action_taken }}</span></td>
+              <td class="audit-time">{{ row.action_time.strftime('%d %b %Y, %H:%M') }}</td>
+              <td class="audit-changes">
+                {% if row.old_setting %}
+                <ul class="audit-kv">
+                  {% for key, val in row.old_setting.items() %}
+                  <li class="audit-kv-row{% if key in row.changed_setting %} is-changed{% endif %}">
+                    <span class="audit-kv-key">{{ key }}</span>
+                    <span class="audit-kv-val">{{ val }}</span>
+                  </li>
+                  {% endfor %}
+                </ul>
+                {% else %}<span class="audit-empty">—</span>{% endif %}
+              </td>
+              <td class="audit-changes">
+                {% if row.new_setting %}
+                <ul class="audit-kv">
+                  {% for key, val in row.new_setting.items() %}
+                  <li class="audit-kv-row{% if key in row.changed_setting %} is-changed{% endif %}">
+                    <span class="audit-kv-key">{{ key }}</span>
+                    <span class="audit-kv-val">{{ val }}</span>
+                  </li>
+                  {% endfor %}
+                </ul>
+                {% else %}<span class="audit-empty">—</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not rows %}
+            <tr>
+              <td colspan="6" class="users-empty">No audit log entries found</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
