@@ -6,11 +6,6 @@
     width: 100%;
 }
 
-.thermal-breadcrumb {
-    width: 100%;
-    margin-bottom: 4px;
-}
-
 .thermal-image-card {
     grid-row: span 2;
 }
@@ -42,10 +37,10 @@
 
 .thermal-table th,
 .thermal-table td {
-    font-family: var(--font-heading);
+    font-family: var(--font-headers);
     padding: 12px;
     text-align: center;
-    border: 1px solid var(--divider);
+    border: 1px solid black;
     background: var(--bg-card);
     color: var(--text-primary);
 }
@@ -54,5 +49,4 @@
     background: var(--bg-table-header);
     color: var(--text-on-brand);
     position: sticky;
-    font-family: var(--font-heading);
 }

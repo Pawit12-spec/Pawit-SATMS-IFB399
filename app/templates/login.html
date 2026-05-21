@@ -9,10 +9,6 @@
         if (theme === 'dark') {
           document.documentElement.setAttribute('data-theme', 'dark');
         }
-        const cb = localStorage.getItem('colorblind');
-        if (cb === 'on') {
-          document.documentElement.setAttribute('data-colorblind', 'on');
-        }
       })();
     </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='globals.css') }}" />
@@ -24,47 +20,25 @@
   <body class="login-body">
     <div class="login-container">
       <div class="login-card">
-        <img
-          src="{{ url_for('static', filename='img/energy_qld_logo.png') }}"
-          class="login-logo"
-          alt="Energy Queensland"
-        />
+        <img src="{{ url_for('static', filename='img/energy-queensland-logo-208x20.svg') }}" class="login-logo" />
         <h1 class="login-title">Substation Dashboard</h1>
 
         {% if error %}
         <div class="login-error">{{ error }}</div>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('main.login') }}" id="login-form">
+        <form method="POST" action="{{ url_for('main.login') }}">
           <div class="login-field">
             <label for="email">Email</label>
-            <input type="email" id="email" name="email" autocomplete="username" required autofocus />
+            <input type="email" id="email" name="email" required autofocus />
           </div>
           <div class="login-field">
             <label for="password">Password</label>
-            <input type="password" id="password" name="password" autocomplete="current-password" required />
+            <input type="password" id="password" name="password" required />
           </div>
-          <button type="submit" class="login-btn" id="login-submit">
-            <span class="login-btn-text">Sign In</span>
-            <span class="login-btn-spinner" aria-hidden="true"></span>
-          </button>
+          <button type="submit" class="login-btn">Sign In</button>
         </form>
       </div>
     </div>
-
-    <script>
-      (function () {
-        var form = document.getElementById('login-form');
-        var btn = document.getElementById('login-submit');
-        if (form && btn) {
-          form.addEventListener('submit', function () {
-            if (form.checkValidity()) {
-              btn.classList.add('is-loading');
-              btn.disabled = true;
-            }
-          });
-        }
-      })();
-    </script>
   </body>
 </html>

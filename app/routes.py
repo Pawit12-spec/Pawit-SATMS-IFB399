@@ -1,8 +1,5 @@
-import csv
-import io
 import os
 import sys
-import json
 import uuid
 from pathlib import Path
 from functools import wraps
@@ -12,8 +9,6 @@ from urllib3.exceptions import NewConnectionError, MaxRetryError
 from collections import deque
 import joblib
 import pandas as pd
-import numpy as np
-from datetime import timezone, timedelta
 from zoneinfo import ZoneInfo
 
 import psycopg2
@@ -27,172 +22,61 @@ from .sse import SSEBroker, stream
 import threading
 import time
 from .Alert_System import alert
-from .thermal_model.model import analyse_image as thermal_analyse_image, thermal_analytics
-from .thermal_model.substation_configs import get_zone_temperatures, EQUIPMENT_THRESHOLDS, update_equipment_counters
-from .ml import score_reading, data_analytics
+
 
 bp = Blueprint("main", __name__, template_folder="templates")
 broker = SSEBroker()  # Handles Server-Sent Events
 
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
-Brisbane_Time = timezone(timedelta(hours=10))
 
-# Per-site rolling averages keyed by site_id
-site_avg_queues = {}
 
-def _get_site_queues(site_id):
-    """Return the per-site rolling average deques, creating if needed."""
-    if site_id not in site_avg_queues:
-        site_avg_queues[site_id] = {
-            "temp": deque(maxlen=100),
-            "humidity": deque(maxlen=100),
-            "co2": deque(maxlen=100),
-            "aqi": deque(maxlen=100),
-        }
-    return site_avg_queues[site_id]
+### SENSOR ML LOAD ###################################################################################
+
+sensor_file         = joblib.load(os.path.join(os.path.dirname(__file__), "isolation_forest.joblib"))
+sensor_model        = sensor_file  ["pipeline"]
+# sensor_threshold    = sensor_file  ["threshold"]
+sensor_threshold = -0.065
+
+
+def score_reading(reading):
+    """Return the Isolation Forest score and anomaly flag for one reading.
+
+    Args:
+        reading (Mapping): Parsed sensor payload containing temperature, humidity,
+            CO₂, and AQI fields.
+
+    Returns:
+        tuple[float, bool]: The anomaly score and whether the reading is an outlier.
+    """
+    df = pd.DataFrame([{
+        "temperature_c": reading["temperature_c"],
+        "humidity_pct":  reading["humidity_pct"],
+        "co2_ppm":       reading["co2_ppm"],
+        "aqi":           reading["aqi"],
+    }])
+    score      = sensor_model.decision_function(df)[0]
+    is_anomaly = score < sensor_threshold
+    return score, bool(is_anomaly)
+
+
+####################################################################################################
+
+### average qs ##############################
+temp_av_q = deque(maxlen=100)
+humidity_av_q = deque(maxlen=100)
+co2_av_q = deque(maxlen=100)
+aqi_av_q = deque(maxlen=100)
 
 def average(avq):
-    """
-    Compute the running average for a deque while handling empty queues.
-    
+    """Compute the running average for a deque while handling empty queues.
+
+    Args:
+        avq (collections.deque): Rolling collection of numeric samples.
+
     Returns:
         float: Average of the deque contents, or 0.0 when empty.
     """
     return sum(avq) / len(avq) if avq else 0.0
-
-# Per-site latest readings for overview status
-site_latest = {}
-site_cache = {}
-_suppressed_alert_count = {}
-site_name_cache = {}
-
-equipment_fault_counters = {}  # device_id → {equipment_name: consecutive_breach_count}
-_STATUS_PRIORITY = {"normal": 0, "warning": 1, "critical": 2}
-
-
-_pending_alerts = {}
-_pending_lock = threading.Lock()
-ESCALATION_COOLDOWN_MINUTES = 60
-_last_escalation_notify_at = {}
-
-def _site_escalation_config(conn, site_id):
-    """Fetch the escalation config + secondary-contact details for a site."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT s.escalation_enabled, s.escalation_timeout_minutes, "
-            "       s.secondary_contact_user_id, u.full_name, u.email, u.phone_e164 "
-            "FROM site s "
-            "LEFT JOIN app_user u ON u.user_id = s.secondary_contact_user_id "
-            "WHERE s.site_id = %s",
-            (site_id,),
-        )
-        row = cur.fetchone()
-    if not row:
-        return None
-    return {
-        "enabled": bool(row[0]),
-        "timeout_minutes": int(row[1] or 0),
-        "contact_user_id": str(row[2]) if row[2] else None,
-        "contact_name": row[3],
-        "contact_email": row[4],
-        "contact_phone": row[5],
-    }
-
-
-def _clear_pending_alert(site_id):
-    """Remove any pending-alert tracking for site_id."""
-    with _pending_lock:
-        _pending_alerts.pop(site_id, None)
-
-def _record_pending_alert(site_id, status, message):
-    """Register or refresh a pending alert for site_id."""
-    now = datetime.now(timezone.utc)
-    with _pending_lock:
-        existing = _pending_alerts.get(site_id)
-        if existing is None:
-            _pending_alerts[site_id] = {
-                "opened_at": now,
-                "status": status,
-                "escalated": False,
-                "escalated_at": None,
-                "last_message": message,
-            }
-        else:
-            if status == "critical":
-                existing["status"] = "critical"
-            existing["last_message"] = message
-
-def get_user_allowed_site_ids():
-    """Return the set of site UUIDs the current user is allowed to access."""
-    if session.get("role") == "asset_owner":
-        return None  # no restriction
-    user_id = session.get("user_id")
-    if not user_id:
-        return set()
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT site_id FROM user_assets WHERE user_id = %s",
-                    (user_id,),
-                )
-                return {str(r[0]) for r in cur.fetchall()}
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load user allowed sites: %s", e)
-        return set()
-    
-
-def debug_site_display(site_id):
-    if site_id in site_name_cache:
-        return site_name_cache[site_id]
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT name FROM site WHERE site_id = %s", (site_id,))
-                row = cur.fetchone()
-                if row:
-                    site_name_cache[site_id] = row[0]
-                    return row[0]
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"Failed to load site name for {site_id}: {e}")
-        return site_id 
-
-
-def _resolve_site_id(slug):
-    """Map a site slug (e.g. 'roma-street') to its DB UUID, caching results."""
-    if slug in site_cache:
-        return site_cache[slug]
-    # Also allow passing a UUID directly
-    try:
-        uuid.UUID(slug)
-        site_cache[slug] = slug
-        return slug
-    except ValueError:
-        pass
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT site_id FROM site WHERE LOWER(REPLACE(REPLACE(name, ' ', '-'), '''', '')) LIKE %s",
-                    (f"%{slug}%",)
-                )
-                row = cur.fetchone()
-                if row:
-                    site_cache[slug] = str(row[0])
-                    return site_cache[slug]
-        finally:
-            conn.close()
-    except Exception:
-        pass
-    return None
 ##############################################
 
 def allowed_extension(filename: str) -> bool:
@@ -280,7 +164,7 @@ def authenticate_user(email, password):
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT user_id, full_name, password_hash, role, preferences FROM app_user "
+                    "SELECT user_id, full_name, password_hash, role FROM app_user "
                     "WHERE email = %s AND is_active = TRUE",
                     (email,)
                 )
@@ -288,7 +172,7 @@ def authenticate_user(email, password):
         finally:
             conn.close()
         if row and check_password_hash(row[2], password):
-            return {"user_id": str(row[0]), "full_name": row[1], "role": row[3], "preferences": row[4] or {}}
+            return {"user_id": str(row[0]), "full_name": row[1], "role": row[3]}
     except Exception as e:
         current_app.logger.warning("Auth DB error: %s", e)
     return None
@@ -311,9 +195,7 @@ def login() -> str | Response:
             session["user_id"] = user["user_id"]
             session["full_name"] = user["full_name"]
             session["role"] = user["role"]
-            session["preferences"] = user["preferences"]
-            default_page = user["preferences"].get("default_page", "index")
-            return redirect(url_for(f"main.{default_page}"))
+            return redirect(url_for("main.index"))
         error = "Invalid email or password"
     return render_template("login.html", error=error)
 
@@ -330,280 +212,24 @@ def logout() -> Response:
     return redirect(url_for("main.login"))
 
 
-@bp.post("/api/profile")
-@login_required
-def update_profile() -> Response:
-    """Update the current user's display name.
-
-    Returns:
-        Response: JSON result indicating success or failure.
-    """
-    user_id = session.get("user_id")
-    data = request.get_json(silent=True) or {}
-    full_name = data.get("full_name", "").strip()
-    if not full_name:
-        return jsonify(error="Name cannot be empty"), 400
-    if len(full_name) > 100:
-        return jsonify(error="Name too long"), 400
-    
-    old_user_setting = None
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute( 
-                    "SELECT full_name FROM app_user WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-                old_user_setting = {"Full Name": row[0]} 
-                cur.execute(
-                    "UPDATE app_user SET full_name = %s WHERE user_id = %s",
-                    (full_name, user_id)
-                )
-            conn.commit()
-        finally:
-            conn.close()
-        session["full_name"] = full_name
-        write_audit_log(
-            action="profile.update",
-            old_setting=old_user_setting,
-            new_setting={"Full Name": full_name},
-        )
-        return jsonify(success=True, full_name=full_name)
-    except Exception as e:
-        current_app.logger.warning("Failed to update profile: %s", e)
-        return jsonify(error="Failed to update profile"), 500
-
-
-@bp.post("/api/preferences")
-@login_required
-def save_preferences() -> Response:
-    """Persist a partial set of user preferences to PostgreSQL and the session."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify(error="User not authenticated"), 401
-
-    data = request.get_json(silent=True) or {}
-    preferences = data.get("preferences")
-
-    if not isinstance(preferences, dict):
-        return jsonify(error="Invalid preferences"), 400
-
-    allowed_values = {
-        "theme": {"light", "dark"},
-        "default_page": {
-            "index", "temperature", "humidity",
-            "co2", "air_quality", "thermal"
-        },
-        "data_delay_threshold": {60, 120, 300, 600},
-        "colorblind": {"off", "on"},
-    }
-
-    int_fields = {"data_delay_threshold"}
-    sanitised = {}
-
-    for key, value in preferences.items():
-        if key not in allowed_values:
-            continue
-
-        if key in int_fields:
-            try:
-                value = int(value)
-            except (TypeError, ValueError):
-                continue
-
-        if value in allowed_values[key]:
-            sanitised[key] = value
-
-    if not sanitised:
-        return jsonify(error="No valid preferences provided"), 400
-
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE app_user
-                    SET preferences = preferences || %s::jsonb
-                    WHERE user_id = %s
-                    """,
-                    (json.dumps(sanitised), user_id),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-
-        session["preferences"] = {
-            **session.get("preferences", {}),
-            **sanitised,
-        }
-        return jsonify(success=True)
-
-    except Exception as e:
-        current_app.logger.warning("Failed to save preferences: %s", e)
-        return jsonify(error="Failed to save preferences"), 500
-
-### AUDIT LOG   ######################################################################################
-
-def write_audit_log(action, old_setting=None, new_setting=None):
-    action_user_ID = session.get("user_id")
-    action_user_name = session.get("full_name")
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                "INSERT INTO audit_log (action_user_id, action_user_name, action_taken, old_setting, new_setting) "
-                "VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)",
-                (action_user_ID, action_user_name, action,
-                 json.dumps(old_setting) if old_setting is not None else None,
-                 json.dumps(new_setting) if new_setting is not None else None,),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to write audit log: %s", e)
-
-@bp.route("/audit-log")
-@login_required
-def audit_log() -> str:
-    rows = []
-    try: 
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT action_id, action_user_name, action_taken, old_setting, new_setting, action_time "
-                    "FROM audit_log ORDER BY action_time DESC"
-                    )
-                rows = []
-                for r in cur.fetchall():
-                    old_setting = r[3]
-                    new_setting = r[4]
-                    action_time = r[5].astimezone(Brisbane_Time)
-                    changed_setting = set()
-                    if old_setting and new_setting:
-                        changed_setting = {key for key in (old_setting.keys()) & (new_setting.keys())
-                                           if old_setting[key] != new_setting[key]}
-                    rows.append({
-                        "action_id": str(r[0]),
-                        "action_user_name": r[1],
-                        "action_taken": r[2],
-                        "old_setting": old_setting,
-                        "new_setting": new_setting,
-                        "action_time": action_time,
-                        "changed_setting": changed_setting,
-                    })
-                
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load audit log: %s", e)
-    return render_template("audit_log.html", rows=rows)
-
-### MAIN ROUTES  ######################################################################################
-
 @bp.route("/")
 @login_required
 def index() -> str:
-    """Render the overview page with all sites and their latest status."""
-    sites = []
-    allowed = get_user_allowed_site_ids()
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                if allowed is None:
-                    cur.execute(
-                        "SELECT site_id, name, room_name, region, address "
-                        "FROM site ORDER BY name"
-                    )
-                else:
-                    if not allowed:
-                        return render_template("overview.html", sites=[])
-                    cur.execute(
-                        "SELECT site_id, name, room_name, region, address "
-                        "FROM site WHERE site_id = ANY(%s::uuid[]) ORDER BY name",
-                        (list(allowed),),
-                    )
-                for r in cur.fetchall():
-                    sid = str(r[0])
-                    latest = site_latest.get(sid, {})
-                    with _pending_lock:
-                        pending = _pending_alerts.get(sid)
-                    is_escalated = bool(pending and pending.get("escalated"))
-                    status = latest.get("status", "normal")
-                    if is_escalated:
-                        status = "escalated"
-                    sites.append({
-                        "site_id": sid,
-                        "name": r[1],
-                        "room_name": r[2],
-                        "region": r[3],
-                        "address": r[4] or "Substation Room",
-                        "status": status,
-                        "last_reading": latest.get("last_reading", "--"),
-                        "temperature_c": latest.get("temperature_c"),
-                        "humidity_pct": latest.get("humidity_pct"),
-                        "co2_ppm": latest.get("co2_ppm"),
-                        "aqi": latest.get("aqi"),
-                        "suppressed_occurrence_count": latest.get("suppressed_occurrence_count", 0),
-                        "escalated": is_escalated,
-                    })
-                # Fetch latest review per site
-                site_id_list = [s["site_id"] for s in sites]
-                reviews_map = _get_latest_reviews(conn, site_id_list)
-                for s in sites:
-                    rev = reviews_map.get(s["site_id"])
-                    s["suppressed"] = rev is not None
-                    s["last_reviewed_by"] = rev["reviewed_by"] if rev else None
-                    s["last_reviewed_at"] = rev["reviewed_at"] if rev else None
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load sites for overview: %s", e)
-    return render_template("overview.html", sites=sites)
+    """Render the main dashboard.
 
-@bp.route("/dashboard")
-@bp.route("/dashboard/<site_id>")
-@login_required
-def dashboard(site_id=None) -> str:
-    """Render the dashboard with sensor cards and charts, optionally for a specific site."""
-    site_info = None
-    if site_id:
-        allowed = get_user_allowed_site_ids()
-        if allowed is not None and site_id not in allowed:
-            abort(403)
-        try:
-            conn = _get_pg_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT site_id, name, room_name, region, address "
-                        "FROM site WHERE site_id = %s", (site_id,)
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        site_info = {
-                            "site_id": str(row[0]),
-                            "name": row[1],
-                            "room_name": row[2],
-                            "region": row[3],
-                            "address": row[4],
-                        }
-            finally:
-                conn.close()
-        except Exception as e:
-            current_app.logger.warning("Failed to load site info: %s", e)
-    return render_template("index.html", site_info=site_info)
+    Returns:
+        str: Dashboard HTML template.
+    """
+    return render_template("index.html")
 
 @bp.route("/temperature")
-@bp.route("/temperature/<site_id>")
 @login_required
-def temperature(site_id=None) -> str:
-    """Render the sensor page configured for temperature readings."""
-    site_info = _load_site_info(site_id)
+def temperature() -> str:
+    """Render the sensor page configured for temperature readings.
+
+    Returns:
+        str: Sensor template tailored to temperature metrics.
+    """
     return render_template("sensor.html",
                            title="Temperature",
                            page_title="TEMPERATURE",
@@ -612,17 +238,17 @@ def temperature(site_id=None) -> str:
                            chart_title="Temperature",
                            table_heading="TEMPERATURE",
                            sensor_field="temperature_c",
-                           sensor_color="#ef4444",
-                           site_info=site_info,
-                           base_path="/temperature",
+                           sensor_color="#ef4444"
                            )
     
 @bp.route("/humidity")
-@bp.route("/humidity/<site_id>")
 @login_required
-def humidity(site_id=None) -> str:
-    """Render the sensor page configured for humidity readings."""
-    site_info = _load_site_info(site_id)
+def humidity() -> str:
+    """Render the sensor page configured for humidity readings.
+
+    Returns:
+        str: Sensor template tailored to humidity metrics.
+    """
     return render_template("sensor.html",
                            title="Humidity",
                            page_title="HUMIDITY",
@@ -631,18 +257,18 @@ def humidity(site_id=None) -> str:
                            chart_title="Humidity",
                            table_heading="HUMIDITY",
                            sensor_field="humidity_pct",
-                           sensor_color="#a855f7",
-                           site_info=site_info,
-                           base_path="/humidity",
+                           sensor_color="#a855f7"
                            )
 
 
 @bp.route("/co2")
-@bp.route("/co2/<site_id>")
 @login_required
-def co2(site_id=None) -> str:
-    """Render the sensor page configured for CO₂ readings."""
-    site_info = _load_site_info(site_id)
+def co2() -> str:
+    """Render the sensor page configured for CO₂ readings.
+
+    Returns:
+        str: Sensor template tailored to CO₂ metrics.
+    """
     return render_template("sensor.html",
                            title="CO2",
                            page_title="CO2",
@@ -651,22 +277,18 @@ def co2(site_id=None) -> str:
                            chart_title="CO2",
                            table_heading="CO2",
                            sensor_field="co2_ppm",
-                           sensor_color="#22d3ee",
-                           site_info=site_info,
-                           base_path="/co2",
+                           sensor_color="#22d3ee"
                            )
 
 
 @bp.route("/air-quality")
-@bp.route("/air-quality/<site_id>")
 @login_required
-def air_quality(site_id=None) -> str:
+def air_quality() -> str:
     """Render the sensor page configured for air quality index readings.
 
     Returns:
         str: Sensor template tailored to AQI metrics.
     """
-    site_info = _load_site_info(site_id)
     return render_template("sensor.html",
                            title="Air Quality",
                            page_title="AIR QUALITY",
@@ -675,56 +297,20 @@ def air_quality(site_id=None) -> str:
                            chart_title="Air Quality",
                            table_heading="AIR QUALITY",
                            sensor_field="aqi",
-                           sensor_color="#f59e0b",
-                           site_info=site_info,
-                           base_path="/air-quality",
+                           sensor_color="#f59e0b"
                            )
-
-def _load_site_info(site_id):
-    """Load site metadata from PostgreSQL for optional site-scoped views."""
-    if not site_id:
-        return None
-    allowed = get_user_allowed_site_ids()
-    if allowed is not None and site_id not in allowed:
-        abort(403)
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT site_id, name, room_name, region, address "
-                    "FROM site WHERE site_id = %s", (site_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    return {
-                        "site_id": str(row[0]),
-                        "name": row[1],
-                        "room_name": row[2],
-                        "region": row[3],
-                        "address": row[4],
-                    }
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load site info: %s", e)
-    return None
     
 @bp.route("/thermal")
-@bp.route("/thermal/<site_id>")
 @login_required
-def thermal(site_id=None) -> str:
+def thermal() -> str:
     """Render the thermal camera page with the latest image metadata.
 
     Returns:
         str: Thermal camera template populated with latest and recent images.
     """
-    site_info = _load_site_info(site_id)
     latest_image = get_latest_image()
     recent_images = get_recent_images(limit = 20)
     return render_template("thermal.html",
-                           site_info = site_info,
-                           base_path = "/thermal",
                            latest_image = latest_image,
                            recent_images = recent_images
     )
@@ -831,105 +417,8 @@ def upload_image():
     f.save(save_path)
 
     camera_id = request.form.get("camera_id", "unknown")
-    now_dt = datetime.now(Brisbane_Time)
+    now_dt = datetime.now(timezone.utc)
     now_ns = to_ns(now_dt)
-
-    thermal_result   = thermal_analyse_image(str(save_path))
-    thermal_analysis = thermal_analytics(thermal_result)
-    if thermal_analysis["analysis"]:
-        print(f"[THERMAL ANALYTICS] {thermal_analysis['analysis']}")
-
-    # Resolve recipients for this camera
-    recipients_email, recipients_phone = [], []
-    cam_site_id = None
-    try:
-        _conn = _get_pg_conn()
-        with _conn.cursor() as cur:
-            cur.execute(
-                "SELECT site_id FROM device WHERE serial_number = %s OR device_id::text = %s",
-                (camera_id, camera_id),
-            )
-            row = cur.fetchone()
-        cam_site_id = str(row[0]) if row else None
-        if cam_site_id:
-            cfg = _site_escalation_config(_conn, cam_site_id)
-            if cfg and cfg["contact_email"]:
-                recipients_email = [cfg["contact_email"]]
-                recipients_phone = [cfg["contact_phone"]] if cfg["contact_phone"] else []
-        _conn.close()
-    except Exception:
-        pass
-
-    # Hotspot alert
-    if thermal_result["is_anomaly"]:
-        try:
-            a = alert.HighPriorityAlert(
-                f"Irregular hotspot detected — camera {camera_id}. "
-                f"Please ensure equipment is behaving correctly.\nTimestamp: {now_dt.isoformat()}",
-                camera_id, now_dt.isoformat(),
-                recipients_email=recipients_email,
-                recipients_phone=recipients_phone,
-            )
-            a.trigger()
-        except Exception as e:
-            current_app.logger.warning("Hotspot alert failed: %s", e)
-
-    # Equipment zone temperature thresholds from raw MLX90640 data (24×32 = 768 floats)
-    equipment_readings = {}
-    temp_data_raw = request.form.get("temp_data")
-    if temp_data_raw:
-        try:
-            raw = json.loads(temp_data_raw)
-            if len(raw) == 768:
-                zone_temps = get_zone_temperatures(camera_id, raw)
-                device_key = cam_site_id or camera_id
-                counters   = equipment_fault_counters.setdefault(
-                    device_key, {name: 0 for name in EQUIPMENT_THRESHOLDS}
-                )
-                equipment_readings = update_equipment_counters(zone_temps, counters)
-                for name, reading in equipment_readings.items():
-                    count = counters[name]
-                    if count == 1:
-                        print(f"[LOW] {name} [{device_key}]: 1st overheating reading. Temp: {reading['temp']}°C")
-                    elif count == 2:
-                        print(f"[MEDIUM] {name} [{device_key}]: 2nd consecutive overheating. Temp: {reading['temp']}°C")
-                    elif count >= 3:
-                        try:
-                            a = alert.HighPriorityAlert(
-                                f"{name} overheating — {count} consecutive readings above {reading['threshold']}°C.\n"
-                                f"Last reading: {reading['temp']}°C. Immediate attention required!\nTimestamp: {now_dt.isoformat()}",
-                                f"{name} [{camera_id}]", now_dt.isoformat(),
-                                recipients_email=recipients_email,
-                                recipients_phone=recipients_phone,
-                            )
-                            a.trigger()
-                        except Exception as e:
-                            current_app.logger.warning("Equipment alert failed: %s", e)
-        except Exception as e:
-            current_app.logger.warning("Equipment temp extraction failed: %s", e)
-
-    # Determine overall thermal status for this site
-    thermal_status = "critical" if thermal_result["is_anomaly"] else "normal"
-    for r in equipment_readings.values():
-        if _STATUS_PRIORITY.get(r["status"], 0) > _STATUS_PRIORITY.get(thermal_status, 0):
-            thermal_status = r["status"]
-
-    # Update site_latest — merge with existing sensor data, only escalate status never downgrade
-    if cam_site_id:
-        existing = site_latest.get(cam_site_id, {})
-        if _STATUS_PRIORITY.get(thermal_status, 0) >= _STATUS_PRIORITY.get(existing.get("status", "normal"), 0):
-            existing["status"] = thermal_status
-        existing["thermal_anomaly"]    = thermal_result["is_anomaly"]
-        existing["thermal_confidence"] = thermal_result["confidence"]
-        existing["equipment_readings"] = equipment_readings
-        site_latest[cam_site_id] = existing
-
-    # Register pending alert so thermal anomalies feed the escalation system
-    if cam_site_id and thermal_status in ("warning", "critical"):
-        msg = f"{thermal_status.upper()} thermal event at site {cam_site_id} — camera {camera_id}"
-        if thermal_result["is_anomaly"]:
-            msg += f", hotspot detected (confidence: {thermal_result['confidence']}%)"
-        _record_pending_alert(cam_site_id, thermal_status, msg)
 
     try:
         lp = (
@@ -944,18 +433,6 @@ def upload_image():
     except Exception as e:
         current_app.logger.warning("Influx write failed; skipping: %s", e)
 
-    if equipment_readings:
-        try:
-            lines = [
-                f"equipment_temperatures,camera_id={_escape_tag(camera_id)},equipment={_escape_tag(name)} "
-                f"temp={reading['temp']},threshold={reading['threshold']} "
-                f"{now_ns}"
-                for name, reading in equipment_readings.items()
-            ]
-            current_app.extensions["influx3"].write("\n".join(lines))
-        except Exception as e:
-            current_app.logger.warning("Equipment readings Influx write failed: %s", e)
-
     broker.publish(
         {
             "id": image_id,
@@ -963,12 +440,7 @@ def upload_image():
             "size_bytes": save_path.stat().st_size,
             "content_type": f.mimetype,
             "camera_id": camera_id,
-            "timestamp": now_dt.isoformat(),
-            "is_anomaly": thermal_result["is_anomaly"],
-            "confidence": thermal_result["confidence"],
-            "analysis": thermal_analysis["analysis"],
-            "status": thermal_status,
-            "equipment_readings": equipment_readings,
+            "timestamp": now_dt.isoformat()
         },
         event="thermal_image",
         id=str(now_ns),
@@ -1026,85 +498,23 @@ def consume_reading():
         return jsonify(error=f"Bad payload: {e}"), 400
 
     device_id = str(data.get("device_id", "unknown"))
-    site_id = str(data.get("site_id", "unknown"))
     ns = to_ns(ts)
-    
-    with pi_lock:
-        pi_last_seen[device_id] = time.time()
 
-    # Resolve slug to DB UUID early so all downstream uses are consistent
-    db_site_id = _resolve_site_id(site_id) or site_id
+    temp_av_q.append(temperature_c)
+    humidity_av_q.append(humidity_pct)
+    co2_av_q.append(co2_ppm)
+    aqi_av_q.append(aqi)
 
-    # Per-site rolling averages (keyed by DB UUID)
-    queues = _get_site_queues(db_site_id)
-    queues["temp"].append(temperature_c)
-    queues["humidity"].append(humidity_pct)
-    queues["co2"].append(co2_ppm)
-    queues["aqi"].append(aqi)
+    avg_temperature_c = average(temp_av_q)
+    avg_humidity_pct = average(humidity_av_q)
+    avg_co2_ppm = average(co2_av_q)
+    avg_aqi = average(aqi_av_q)
 
-    avg_temperature_c = average(queues["temp"])
-    avg_humidity_pct = average(queues["humidity"])
-    avg_co2_ppm = average(queues["co2"])
-    avg_aqi = average(queues["aqi"])
-
-    scores, anomaly_run, is_anomaly = score_reading(data, db_site_id, display_name=debug_site_display(db_site_id))
-    score = scores
-    
-    # Determine site status for overview
-    status = "normal"
-    if is_anomaly and not is_site_suppressed(db_site_id):
-        if temperature_c > 40 or co2_ppm > 1500 or humidity_pct > 80:
-            status = "critical"
-        else:
-            status = "warning"
-    elif is_anomaly and is_site_suppressed(db_site_id):
-        _suppressed_alert_count[db_site_id] = _suppressed_alert_count.get(db_site_id, 0) + 1
-
-    if status in ("warning", "critical"):
-        msg = (f"{status.upper()} reading at site {db_site_id}: "
-               f"temp={temperature_c}°C humidity={humidity_pct}% "
-               f"co2={co2_ppm}ppm aqi={aqi}")
-        _record_pending_alert(db_site_id, status, msg)
-        with _pending_lock:
-            entry = _pending_alerts.get(db_site_id)
-        if entry and entry.get("escalated"):
-            status = "escalated"
-    else:
-        _clear_pending_alert(db_site_id)
-
-
-    # Update latest reading cache for overview
-    from datetime import datetime as dt_cls
-    elapsed = datetime.now(timezone.utc) - ts.astimezone(timezone.utc) if ts.tzinfo else datetime.now(timezone.utc) - ts.replace(tzinfo=timezone.utc)
-    mins = max(1, int(elapsed.total_seconds() / 60))
-    last_str = f"{mins} MIN AGO" if mins < 60 else f"{mins // 60} HR AGO"
-
-
-    analytics = data_analytics(data, db_site_id, anomaly_run)
-    if analytics["analysis"]:
-        print(f"[{debug_site_display(db_site_id)} ANALYTICS] {analytics['analysis']}")
-
-
-    # Merge sensor data into site_latest, preserving thermal fields from upload_image.
-    # Only escalate status — never let a normal sensor reading downgrade a thermal critical.
-    existing = site_latest.get(db_site_id, {})
-    merged_status = status if _STATUS_PRIORITY.get(status, 0) >= _STATUS_PRIORITY.get(existing.get("status", "normal"), 0) else existing.get("status", "normal")
-    existing.update({
-        "status": merged_status,
-        "last_reading": last_str,
-        "temperature_c": temperature_c,
-        "humidity_pct": humidity_pct,
-        "co2_ppm": co2_ppm,
-        "aqi": aqi,
-        "is_anomaly": is_anomaly,
-        "suppressed_occurrence_count": _suppressed_alert_count.get(db_site_id, 0),
-    })
-    site_latest[db_site_id] = existing
+    score, is_anomaly = score_reading(data)
 
     broker.publish(
         {
             "device_id": device_id,
-            "site_id": db_site_id,
             "temperature_c": temperature_c,
             "humidity_pct": humidity_pct,
             "co2_ppm": co2_ppm,
@@ -1116,9 +526,6 @@ def consume_reading():
             "avg_aqi": avg_aqi,
             "anomaly_score": score,
             "is_anomaly": is_anomaly,
-            "sensor_anomalies": anomaly_run,
-            "status": status,
-            "analysis": analytics["analysis"],
         },
         event="reading",
         id=str(ns),
@@ -1126,7 +533,7 @@ def consume_reading():
 
     try:
         lp = (
-            f"readings,device_id={_escape_tag(device_id)},site_id={_escape_tag(db_site_id)} "
+            f"readings,device_id={_escape_tag(device_id)} "
             f"temperature_c={temperature_c},humidity_pct={humidity_pct},co2_ppm={co2_ppm},aqi={aqi} "
             f"{ns}"
         )
@@ -1136,78 +543,32 @@ def consume_reading():
 
     return jsonify(status="ok"), 201
 
+@bp.route("/users")
+@role_required("asset_owner")
+def users() -> str:
+    """Render the user administration page populated from PostgreSQL.
 
-def check_phonenumber(raw: str):
-    if not raw:
-        return None, None
-    digits = "".join(ch for ch in raw if ch.isdigit())
-    if not digits:
-        return None, "Phone number must contain digits"
-    if len(digits) < 8 or len(digits) > 15:
-        return None, "Phone number must be 8-15 digits in the proper format"
-    return digits, None
-
-
-def _load_manage_context():
-    """Load users, sites, and contacts for the unified manage page."""
+    Returns:
+        str: Users template preloaded with account rows.
+    """
     users_list = []
-    sites = []
-    contacts = []
     try:
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT user_id, full_name, email, phone_e164, role, is_active "
+                    "SELECT user_id, full_name, email, role, is_active "
                     "FROM app_user ORDER BY full_name"
                 )
                 users_list = [
-                    {
-                        "user_id": str(r[0]),
-                        "full_name": r[1],
-                        "email": r[2],
-                        "phone_e164": r[3],
-                        "role": r[4],
-                        "is_active": r[5],
-                    }
-                    for r in cur.fetchall()
-                ]
-                cur.execute(
-                    "SELECT s.site_id, s.name, s.room_name, s.region, s.address, "
-                    "       s.latitude, s.longitude, "
-                    "       s.escalation_enabled, s.escalation_timeout_minutes, "
-                    "       s.secondary_contact_user_id, u.full_name "
-                    "FROM site s "
-                    "LEFT JOIN app_user u ON u.user_id = s.secondary_contact_user_id "
-                    "ORDER BY s.name"
-                )
-                sites = [
-                    {
-                        "site_id": str(r[0]), "name": r[1], "room_name": r[2],
-                        "region": r[3], "address": r[4],
-                        "latitude": float(r[5]) if r[5] is not None else None,
-                        "longitude": float(r[6]) if r[6] is not None else None,
-                        "escalation_enabled": bool(r[7]),
-                        "escalation_timeout_minutes": int(r[8] or 0),
-                        "secondary_contact_user_id": str(r[9]) if r[9] else "",
-                        "secondary_contact_name": r[10] or "",
-                    }
-                    for r in cur.fetchall()
-                ]
-                cur.execute(
-                    "SELECT user_id, full_name, email FROM app_user "
-                    "WHERE is_active = TRUE ORDER BY full_name"
-                )
-                contacts = [
-                    {"user_id": str(r[0]), "full_name": r[1], "email": r[2] or ""}
+                    {"user_id": str(r[0]), "full_name": r[1], "email": r[2], "role": r[3], "is_active": r[4]}
                     for r in cur.fetchall()
                 ]
         finally:
             conn.close()
     except Exception as e:
-        current_app.logger.warning("Failed to load manage context: %s", e)
-    return users_list, sites, contacts
-
+        current_app.logger.warning("Failed to load users: %s", e)
+    return render_template("users.html", users=users_list)
 
 @bp.get("/users/<user_id>/assets")
 @role_required("asset_owner")
@@ -1227,9 +588,9 @@ def get_user_assets(user_id) -> Response:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT s.name, s.site_id "
-                    "FROM user_assets ua "
-                    "JOIN site s ON s.site_id = ua.site_id "
-                    "WHERE ua.user_id = %s",
+                    "FROM site_user su "
+                    "JOIN site s ON s.site_id = su.site_id "
+                    "WHERE su.user_id = %s",
                     (user_id,)
                 )
                 user_asset_list = [
@@ -1296,12 +657,8 @@ def update_user_assets(user_id):
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT name FROM site where site_id = %s", (site_id,))
-                site_row = cur.fetchone()
-                cur.execute("SELECT full_name FROM app_user where user_id = %s", (user_id,))
-                user_row = cur.fetchone()
                 cur.execute(
-                    "INSERT INTO user_assets (site_id, user_id) VALUES (%s, %s) "
+                    "INSERT INTO site_user (site_id, user_id) VALUES (%s, %s) "
                     "ON CONFLICT (site_id, user_id) DO NOTHING",
                     (site_id, user_id)
                 )
@@ -1311,12 +668,6 @@ def update_user_assets(user_id):
     except Exception as e:
         current_app.logger.warning("Failed to update user assets: %s", e)
         return jsonify(error="Failed to update assets"), 500
-    new_asset_setting = {"Site" : site_row[0], "User": user_row[0]}
-    write_audit_log(
-        action="assets.add",
-        old_setting=None,
-        new_setting=new_asset_setting
-    )
 
     return jsonify(success=True)
 
@@ -1344,12 +695,8 @@ def remove_user_asset(user_id):
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT name FROM site where site_id = %s", (site_id,))
-                site_row = cur.fetchone()
-                cur.execute("SELECT full_name FROM app_user where user_id = %s", (user_id,))
-                user_row = cur.fetchone()
                 cur.execute(
-                    "DELETE FROM user_assets WHERE site_id = %s AND user_id = %s",
+                    "DELETE FROM site_user WHERE site_id = %s AND user_id = %s",
                     (site_id, user_id)
                 )
             conn.commit()
@@ -1358,12 +705,6 @@ def remove_user_asset(user_id):
     except Exception as e:
         current_app.logger.warning("Failed to remove user asset: %s", e)
         return jsonify(error="Failed to remove asset"), 500
-    old_asset_setting = {"Site" : site_row[0], "User": user_row[0]}
-    write_audit_log(
-        action="assets.remove",
-        old_setting=old_asset_setting,
-        new_setting=None,
-    )
 
     return jsonify(success=True)
     
@@ -1381,49 +722,32 @@ def update_user(user_id) -> Response:
     
     full_name = request.form.get("full_name", "").strip()
     email = request.form.get("email", "").strip()
-    phone_raw = request.form.get("phone_e164", "").strip()
     role = request.form.get("role", "user")
-
+    
     if role not in ("user", "asset_owner"):
-        role = "user"
+        role = "user"    
+    
     if not full_name or not email:
-        return redirect(url_for("main.assets", tab="users", error="All fields are required to be filled."))
+        return redirect(url_for("main.users", error="All fields are required to be filled."))
 
-    phone_e164, phone_error = check_phonenumber(phone_raw)
-    if phone_error:
-        return redirect(url_for("main.assets", tab="users", error=phone_error))
-    ## new var for audit log
-    old_user_setting = None 
     try:
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT full_name, email, phone_e164, role FROM app_user WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-                if row:
-                    old_user_setting = {"Full Name": row[0], "Email": row[1], "Phone": row[2], "Role": row[3]}
-                cur.execute(
-                    "UPDATE app_user SET full_name = %s, email = %s, phone_e164 = %s, role = %s WHERE user_id = %s",
-                    (full_name, email, phone_e164, role, user_id)
+                    "UPDATE app_user SET full_name = %s, email = %s, role = %s WHERE user_id = %s",
+                    (full_name, email, role, user_id)
                 )
             conn.commit()
         finally:
             conn.close()
-    except psycopg2.errors.UniqueViolation as e:
-        msg = str(e).lower()
-        if "phone" in msg:
-            return redirect(url_for("main.assets", tab="users", error="A user with that phone number already exists"))
-        return redirect(url_for("main.assets", tab="users", error="A user with that email already exists"))
+    except psycopg2.errors.UniqueViolation:
+        return redirect(url_for("main.users", error="A user with that email already exists"))
     except Exception as e:
         current_app.logger.warning("Failed to update user: %s", e)
-        return redirect(url_for("main.assets", tab="users", error="Failed to update user"))
-    new_user_setting = {"Full Name": full_name, "Email": email, "Phone": phone_e164, "Role": role}
-    write_audit_log(
-        action="users.update",
-        old_setting=old_user_setting,
-        new_setting=new_user_setting,)
-    return redirect(url_for("main.assets", tab="users", success="User updated successfully"))
+        return redirect(url_for("main.users", error="Failed to update user"))
+
+    return redirect(url_for("main.users", success="User updated successfully"))
             
 
 @bp.route("/users/create", methods=["POST"])
@@ -1436,65 +760,34 @@ def create_user():
     """
     full_name = request.form.get("full_name", "").strip()
     email = request.form.get("email", "").strip()
-    phone_raw = request.form.get("phone_e164", "").strip()
     password = request.form.get("password", "")
     role = request.form.get("role", "user")
-    site_ids = [s for s in request.form.getlist("site_ids") if s]
 
     if role not in ("user", "asset_owner"):
         role = "user"
 
     if not full_name or not email or not password:
-        return redirect(url_for("main.assets", tab="users", error="All fields are required"))
+        return redirect(url_for("main.users", error="All fields are required"))
 
-    phone_e164, phone_error = check_phonenumber(phone_raw)
-    if phone_error:
-        return redirect(url_for("main.assets", tab="users", error=phone_error))
-
-    assigned_site_names = []
     try:
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO app_user (full_name, email, phone_e164, password_hash, role) "
-                    "VALUES (%s, %s, %s, %s, %s) RETURNING user_id",
-                    (full_name, email, phone_e164, generate_password_hash(password), role)
+                    "INSERT INTO app_user (full_name, email, password_hash, role) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (full_name, email, generate_password_hash(password), role)
                 )
-                new_user_id = cur.fetchone()[0]
-                if site_ids:
-                    cur.execute(
-                        "SELECT site_id, name FROM site WHERE site_id = ANY(%s::uuid[])",
-                        (site_ids,),
-                    )
-                    valid_sites = cur.fetchall()
-                    for site_id, site_name in valid_sites:
-                        cur.execute(
-                            "INSERT INTO user_assets (site_id, user_id) VALUES (%s, %s) "
-                            "ON CONFLICT (site_id, user_id) DO NOTHING",
-                            (site_id, new_user_id),
-                        )
-                        assigned_site_names.append(site_name)
             conn.commit()
         finally:
             conn.close()
-    except psycopg2.errors.UniqueViolation as e:
-        msg = str(e).lower()
-        if "phone" in msg:
-            return redirect(url_for("main.assets", tab="users", error="A user with that phone number already exists"))
-        return redirect(url_for("main.assets", tab="users", error="A user with that email already exists"))
+    except psycopg2.errors.UniqueViolation:
+        return redirect(url_for("main.users", error="A user with that email already exists"))
     except Exception as e:
         current_app.logger.warning("Failed to create user: %s", e)
-        return redirect(url_for("main.assets", tab="users", error="Failed to create user"))
-    new_created_user = {"Full Name": full_name, "Email": email, "Phone": phone_e164, "Role": role}
-    if assigned_site_names:
-        new_created_user["Assigned Sites"] = ", ".join(assigned_site_names)
-    write_audit_log(
-        action="users.create",
-        old_setting=None,
-        new_setting=new_created_user,)
+        return redirect(url_for("main.users", error="Failed to create user"))
 
-    return redirect(url_for("main.assets", tab="users", success="User created successfully"))
+    return redirect(url_for("main.users", success="User created successfully"))
 
 
 @bp.route("/users/<user_id>/delete", methods=["POST"])
@@ -1508,28 +801,19 @@ def delete_user(user_id):
     Returns:
         Response: Redirect back to the users page with status feedback.
     """
-    deleted_user = None
     try:
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT full_name, email, role FROM app_user WHERE user_id = %s", (user_id,)),
-                row = cur.fetchone()
-                if row:
-                    deleted_user = {"Full Name": row[0], "Email": row[1], "Role": row[2]}
                 cur.execute("DELETE FROM app_user WHERE user_id = %s", (user_id,))
             conn.commit()
         finally:
             conn.close()
     except Exception as e:
         current_app.logger.warning("Failed to delete user: %s", e)
-        return redirect(url_for("main.assets", tab="users", error="Failed to delete user"))
-    write_audit_log(
-        action="users.delete",
-        old_setting=deleted_user,
-        new_setting=None,)
+        return redirect(url_for("main.users", error="Failed to delete user"))
 
-    return redirect(url_for("main.assets", tab="users", success="User Deleted!"))
+    return redirect(url_for("main.users", success="User Deleted!"))
 
 
 @bp.route("/users/<user_id>/role", methods=["POST"])
@@ -1543,8 +827,6 @@ def update_role(user_id):
     Returns:
         Response: Redirect back to the users page with status feedback.
     """
-    old_role = None
-    user_name = None
 
     # Make sure no one can just POST a different role lmao
     new_role = request.form.get("role", "user")
@@ -1555,11 +837,6 @@ def update_role(user_id):
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT full_name, role FROM app_user WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-                if row:
-                    old_role = row[1]
-                    user_name = row[0]
                 cur.execute(
                     "UPDATE app_user SET role = %s WHERE user_id = %s",
                     (new_role, user_id)
@@ -1569,47 +846,42 @@ def update_role(user_id):
             conn.close()
     except Exception as e:
         current_app.logger.warning("Failed to update role: %s", e)
-        return redirect(url_for("main.assets", tab="users", error="Failed to update role"))
-    write_audit_log(
-        action="users.update_role",
-        old_setting={"Full Name": user_name, "Role": old_role},
-        new_setting={"Full Name": user_name, "Role": new_role},)
+        return redirect(url_for("main.users", error="Failed to update role"))
 
-    return redirect(url_for("main.assets", tab="users", success="Role updated"))
-
-
-def _parse_escalation_form():
-    """Pull escalation policy fields."""
-    enabled = request.form.get("escalation_enabled", "").lower() in ("1", "on", "true", "yes")
-    try:
-        timeout = int(request.form.get("escalation_timeout_minutes", "30") or 30)
-    except (TypeError, ValueError):
-        timeout = 30
-    timeout = max(1, min(timeout, 1440))
-    contact = (request.form.get("secondary_contact_user_id", "") or "").strip()
-    if not contact:
-        contact = None
-    else:
-        try:
-            uuid.UUID(contact)
-        except ValueError:
-            contact = None
-    return enabled, timeout, contact
+    return redirect(url_for("main.users", success="Role updated"))
 
 
 @bp.route("/assets")
 @role_required("asset_owner")
 def assets():
-    """Render the unified manage (Settings) page."""
-    users_list, sites, contacts = _load_manage_context()
-    tab = request.args.get("tab", "users")
-    if tab not in ("users", "sites"):
-        tab = "users"
-    return render_template(
-        "manage.html",
-        users=users_list, sites=sites, contacts=contacts,
-        active_tab=tab,
-    )
+    """Render the asset management page with site metadata from PostgreSQL.
+
+    Returns:
+        str: Assets template populated with current sites.
+    """
+    sites = []
+    try:
+        conn = _get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT site_id, name, room_name, region, address, latitude, longitude "
+                    "FROM site ORDER BY name"
+                )
+                sites = [
+                    {
+                        "site_id": str(r[0]), "name": r[1], "room_name": r[2],
+                        "region": r[3], "address": r[4],
+                        "latitude": float(r[5]) if r[5] is not None else None,
+                        "longitude": float(r[6]) if r[6] is not None else None,
+                    }
+                    for r in cur.fetchall()
+                ]
+        finally:
+            conn.close()
+    except Exception as e:
+        current_app.logger.warning("Failed to load sites: %s", e)
+    return render_template("assets.html", sites=sites)
 
 
 @bp.route("/assets/create", methods=["POST"])
@@ -1626,7 +898,6 @@ def create_asset():
     address = request.form.get("address", "").strip() or None
     latitude = request.form.get("latitude", "").strip() or None
     longitude = request.form.get("longitude", "").strip() or None
-    esc_enabled, esc_timeout, sec_contact = _parse_escalation_form()
 
     if not name:
         return redirect(url_for("main.assets", error="Site name is required"))
@@ -1644,12 +915,9 @@ def create_asset():
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO site "
-                    "(name, room_name, region, address, latitude, longitude, "
-                    " escalation_enabled, escalation_timeout_minutes, secondary_contact_user_id) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (name, room_name, region, address, latitude, longitude,
-                     esc_enabled, esc_timeout, sec_contact),
+                    "INSERT INTO site (name, room_name, region, address, latitude, longitude) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (name, room_name, region, address, latitude, longitude),
                 )
             conn.commit()
         finally:
@@ -1657,16 +925,7 @@ def create_asset():
     except Exception as e:
         current_app.logger.warning("Failed to create site: %s", e)
         return redirect(url_for("main.assets", error="Failed to create site"))
-    write_audit_log(
-        action="assets.create",
-        old_setting=None,
-        new_setting={
-            "Name": name, "Room Name": room_name, "Region": region,
-            "Address": address, "Latitude": latitude, "Longitude": longitude,
-            "Escalation Enabled": esc_enabled,
-            "Escalation Timeout (min)": esc_timeout,
-            "Secondary Contact": sec_contact,
-        },)
+
     return redirect(url_for("main.assets", success="Site created successfully"))
 
 
@@ -1687,11 +946,10 @@ def edit_asset(site_id):
     address = request.form.get("address", "").strip() or None
     latitude = request.form.get("latitude", "").strip() or None
     longitude = request.form.get("longitude", "").strip() or None
-    esc_enabled, esc_timeout, sec_contact = _parse_escalation_form()
 
     if not name:
         return redirect(url_for("main.assets", error="Site name is required"))
-    old_site_setting = None
+
     try:
         if latitude is not None:
             latitude = float(latitude)
@@ -1705,29 +963,9 @@ def edit_asset(site_id):
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT name, room_name, region, address, latitude, longitude, "
-                    "       escalation_enabled, escalation_timeout_minutes, secondary_contact_user_id "
-                    "FROM site WHERE site_id = %s", (site_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    old_site_setting = {
-                        "Name": row[0], "Room Name": row[1], "Region": row[2],
-                        "Address": row[3],
-                        "Latitude": float(row[4]) if row[4] is not None else None,
-                        "Longitude": float(row[5]) if row[5] is not None else None,
-                        "Escalation Enabled": bool(row[6]),
-                        "Escalation Timeout (min)": int(row[7] or 0),
-                        "Secondary Contact": str(row[8]) if row[8] else None,
-                    }
-                cur.execute(
                     "UPDATE site SET name=%s, room_name=%s, region=%s, address=%s, "
-                    "latitude=%s, longitude=%s, "
-                    "escalation_enabled=%s, escalation_timeout_minutes=%s, "
-                    "secondary_contact_user_id=%s "
-                    "WHERE site_id=%s",
-                    (name, room_name, region, address, latitude, longitude,
-                     esc_enabled, esc_timeout, sec_contact, site_id),
+                    "latitude=%s, longitude=%s WHERE site_id=%s",
+                    (name, room_name, region, address, latitude, longitude, site_id),
                 )
             conn.commit()
         finally:
@@ -1735,18 +973,7 @@ def edit_asset(site_id):
     except Exception as e:
         current_app.logger.warning("Failed to update site: %s", e)
         return redirect(url_for("main.assets", error="Failed to update site"))
-    new_site_setting = {
-        "Name": name, "Room Name": room_name, "Region": region,
-        "Address": address, "Latitude": latitude, "Longitude": longitude,
-        "Escalation Enabled": esc_enabled,
-        "Escalation Timeout (min)": esc_timeout,
-        "Secondary Contact": sec_contact,
-    }
-    write_audit_log(
-        action="assets.update",
-        old_setting=old_site_setting,
-        new_setting=new_site_setting,)
-    
+
     return redirect(url_for("main.assets", success="Site updated successfully"))
 
 
@@ -1761,22 +988,10 @@ def delete_asset(site_id):
     Returns:
         Response: Redirect back to the assets page with status feedback.
     """
-    old_site_setting = None
     try:
         conn = _get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT name, room_name, region, address, latitude, longitude "
-                    "FROM site WHERE site_id = %s", (site_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    old_site_setting = {
-                        "Name": row[0], "Room Name": row[1], "Region": row[2],
-                        "Address": row[3], "Latitude": float(row[4]) if row[4] is not None else None,
-                        "Longitude": float(row[5]) if row[5] is not None else None,
-                    }
                 cur.execute("DELETE FROM site WHERE site_id = %s", (site_id,))
             conn.commit()
         finally:
@@ -1784,10 +999,6 @@ def delete_asset(site_id):
     except Exception as e:
         current_app.logger.warning("Failed to delete site: %s", e)
         return redirect(url_for("main.assets", error="Failed to delete site"))
-    write_audit_log(
-        action="assets.delete",
-        old_setting=old_site_setting,
-        new_setting=None,)
 
     return redirect(url_for("main.assets", success="Site deleted"))
 
@@ -1807,18 +1018,15 @@ def init_db():
     )
     return jsonify(result)
 
+
 ####### Heartbeat monitoring for offline device detection and alerting (failsafe system) ##############
-pi_lock = threading.Lock()
-device_rolling_avg = {} 
+####### Heartbeat monitoring for offline device detection and alerting (failsafe system) ##############
 pi_alert_state = {} # device_id -> dict of alert milestones
 pi_last_seen = {} # device_id -> timestamp of last heartbeat
 
 def monitor_offline_devices(current_time):
     """The core logic, separated so Pytest can run it safely."""
-    
-    with pi_lock:
-        seen_devices = list(pi_last_seen.items())
-    for device_id, last_heard in seen_devices:
+    for device_id, last_heard in list(pi_last_seen.items()):
         
         # 1. Initialize the state dictionary for new devices
         if device_id not in pi_alert_state:
@@ -1881,8 +1089,8 @@ def monitor_offline_devices(current_time):
                     )
                     offline_alert.trigger()
                 except Exception as e:
-                    current_app.logger.warning("Failed to send offline alert: %s", e)
-
+                    print(f"Failed to send alert: {e}")
+            
         else:
             # 4. Device is ONLINE (duration < 20s)
             if state["is_offline"]:
@@ -1896,7 +1104,7 @@ def monitor_offline_devices(current_time):
                     )
                     recovery_alert.trigger()
                 except Exception as e:
-                    current_app.logger.warning("Failed to send recovery alert: %s", e)
+                    print(f"Failed to send recovery alert: {e}")
                     
             # Reset all trackers so it is ready for the next failure
             pi_alert_state[device_id] = {
@@ -1904,220 +1112,30 @@ def monitor_offline_devices(current_time):
                 "last_daily": None, "is_offline": False
             }
 
-def monitor_heartbeats(app):
+# 1.THE BACKGROUND THREAD (Runs continuously)
+
+def monitor_heartbeats():
     while True:
-        try:
-            with app.app_context():
-                monitor_offline_devices(time.time())
-        except Exception as e:
-            app.logger.warning("Heartbeat monitor error: %s", e)
+        monitor_offline_devices(time.time())
         time.sleep(10)
 
-
-def start_heartbeat_monitor(app):
-    """Spawn the heartbeat monitor daemon. Skipped during testing."""
-    if app.config.get("TESTING"):
-        return
-    if getattr(app, "_heartbeat_monitor_started", False):
-        return
-    app._heartbeat_monitor_started = True
-    threading.Thread(target=monitor_heartbeats, args=(app,), daemon=True).start()
-
-def _trigger_escalation(site_id, entry):
-    """Escalate an unacknowledged alert: notify the site's secondary contact,
-    persist a review row, and write an audit-log entry."""
-    try:
-        conn = _get_pg_conn()
-    except Exception as e:
-        current_app.logger.warning("Escalation: DB connect failed: %s", e)
-        return
-
-    try:
-        cfg = _site_escalation_config(conn, site_id)
-        if not cfg or not cfg["enabled"] or cfg["timeout_minutes"] <= 0:
-            return
-
-        # Look up the site name for nicer notification text.
-        site_name = site_id
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT name FROM site WHERE site_id = %s", (site_id,))
-                row = cur.fetchone()
-                if row:
-                    site_name = row[0]
-        except Exception:
-            pass
-
-        opened_at = entry["opened_at"]
-        waited_min = int((datetime.now(timezone.utc) - opened_at).total_seconds() // 60)
-        message = (
-            f"ESCALATION: Alert on site '{site_name}' was not acknowledged "
-            f"within {cfg['timeout_minutes']} minutes (open for ~{waited_min} min). "
-        )
-
-        # 1. Notify secondary contact (email + SMS), respecting per-site cooldown.
-        if cfg["contact_email"] or cfg["contact_phone"]:
-            now = datetime.now(timezone.utc)
-            with _pending_lock:
-                last_at = _last_escalation_notify_at.get(site_id)
-                cooldown_active = (
-                    last_at is not None
-                    and ESCALATION_COOLDOWN_MINUTES > 0
-                    and (now - last_at).total_seconds() / 60.0 < ESCALATION_COOLDOWN_MINUTES
-                )
-            if cooldown_active:
-                current_app.logger.info(
-                    "Escalation for %s suppressed by cooldown (last sent %s)",
-                    site_id, last_at.isoformat() if last_at else "never",
-                )
-            else:
-                try:
-                    esc_alert = alert.HighPriorityAlert(
-                        message=message,
-                        source=site_name,
-                        timestamp=datetime.now(timezone.utc),
-                    )
-                    esc_alert.trigger(
-                        recipient_email=cfg["contact_email"],
-                        recipient_phone=cfg["contact_phone"],
-                    )
-                    with _pending_lock:
-                        _last_escalation_notify_at[site_id] = now
-                except Exception as e:
-                    current_app.logger.warning("Escalation notify failed for %s: %s", site_id, e)
-        else:
-            current_app.logger.warning(
-                "Escalation for %s skipped notify: no secondary contact configured", site_id)
-
-        # 2. Persist an anomaly_review row that records the escalation.
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO anomaly_review "
-                    "(site_id, reviewed_by, user_id, status_at_review, comment, "
-                    " timeout_minutes, timeout_until, severity, "
-                    " escalated_at) "
-                    "VALUES (%s, %s, %s, 'escalated', %s, 0, NULL, 'high', "
-                    "        now())",
-                    (site_id, "SYSTEM (escalation)", cfg["contact_user_id"], message),
-                )
-            conn.commit()
-        except Exception as e:
-            current_app.logger.warning("Escalation review insert failed for %s: %s", site_id, e)
-
-        # 3. Audit-log the escalation action.
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO audit_log "
-                    "(action_user_id, action_user_name, action_taken, old_setting, new_setting) "
-                    "VALUES (NULL, %s, %s, %s::jsonb, %s::jsonb)",
-                    (
-                        "SYSTEM",
-                        "alert.escalated",
-                        json.dumps({"status": entry.get("status"), "site_id": site_id}),
-                        json.dumps({
-                            "site_id": site_id,
-                            "site_name": site_name,
-                            "escalated_to_name": cfg["contact_name"],
-                            "minutes_open": waited_min,
-                            "configured_timeout_minutes": cfg["timeout_minutes"],
-                        }),
-                    ),
-                )
-            conn.commit()
-        except Exception as e:
-            current_app.logger.warning("Escalation audit-log failed for %s: %s", site_id, e)
-
-        # 4. Update in-memory state so the overview reflects "escalated".
-        with _pending_lock:
-            cur_entry = _pending_alerts.get(site_id)
-            if cur_entry is not None:
-                cur_entry["escalated"] = True
-                cur_entry["escalated_at"] = datetime.now(timezone.utc)
-        latest = site_latest.get(site_id)
-        if latest is not None:
-            latest["status"] = "escalated"
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+# Start the background monitor thread immediately
+threading.Thread(target=monitor_heartbeats, daemon=True).start()
 
 
-def _escalation_scan():
-    """One pass of the escalation worker. Separated so tests can call directly."""
-    now = datetime.now(timezone.utc)
-    # Snapshot pending entries that aren't yet escalated.
-    with _pending_lock:
-        candidates = [
-            (sid, dict(e)) for sid, e in _pending_alerts.items()
-            if not e.get("escalated")
-        ]
-    if not candidates:
-        return
+# THE FLASK ROUTE (Catches the ping from the Pi)
 
-    # Group by site to avoid one DB connect per item; fetch configs lazily.
-    try:
-        conn = _get_pg_conn()
-    except Exception as e:
-        # Can't read configs this round; try again next tick.
-        try:
-            current_app.logger.warning("Escalation scan: DB connect failed: %s", e)
-        except Exception:
-            pass
-        return
-    try:
-        for site_id, entry in candidates:
-            cfg = _site_escalation_config(conn, site_id)
-            if not cfg or not cfg["enabled"] or cfg["timeout_minutes"] <= 0:
-                continue
-            # Don't escalate while the site is in a review-suppression window.
-            if is_site_suppressed(site_id):
-                continue
-            age_min = (now - entry["opened_at"]).total_seconds() / 60.0
-            if age_min >= cfg["timeout_minutes"]:
-                _trigger_escalation(site_id, entry)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
-def monitor_escalations(app):
-    """Background loop: periodically check for unacknowledged alerts that
-    have aged past their site's escalation timeout and escalate them.
-
-    Args:
-        app (flask.Flask): Application instance used to push a request-free
-            app context (needed for ``current_app.config`` in
-            :func:`_get_pg_conn`).
-    """
-    while True:
-        try:
-            with app.app_context():
-                _escalation_scan()
-        except Exception as e:
-            print(f"Escalation scan error: {e}")
-        time.sleep(30)
-
-
-def start_escalation_worker(app):
-    """Spawn the escalation background daemon. Idempotent per process.
-
-    Skipped automatically when ``app.config['TESTING']`` is true so unit
-    tests never accidentally trigger real escalations / outbound notifications.
-    """
-    if app.config.get("TESTING"):
-        return
-    if getattr(app, "_escalation_worker_started", False):
-        return
-    app._escalation_worker_started = True
-    threading.Thread(
-        target=monitor_escalations, args=(app,), daemon=True
-    ).start()
-
+@bp.post("/submit/heartbeat")
+def receive_heartbeat():
+    data = request.get_json(silent=True) or {}
+    device_id = str(data.get("device_id", "pi_1"))
+    
+    # Update the tracker with the exact time the ping arrived.
+    # We DO NOT reset the alert state here anymore so the background thread 
+    # has a chance to see the transition and send the Recovery email!
+    pi_last_seen[device_id] = time.time()
+    
+    return jsonify(status="ok"), 200
 #########################################################################################
 PERIOD_CFG = {
     "day":   {"filter": "time >= now() - interval '1 day'",    "bucket": "5 minutes"},
@@ -2131,14 +1149,17 @@ ALLOWED_FIELDS = {"temperature_c", "humidity_pct", "co2_ppm", "aqi"}
 @bp.get("/api/readings")
 @login_required
 def api_readings():
-    """Return downsampled historical readings from InfluxDB, optionally filtered by site."""
+    """Return downsampled historical readings from InfluxDB.
+
+    Query params:
+        period (str): One of day, week, month, year.
+        field (str): One of temperature_c, humidity_pct, co2_ppm, aqi.
+
+    Returns:
+        Response: JSON with chart (time/avg) and table (time/avg/min/max) arrays.
+    """
     period = request.args.get("period", "day")
     field = request.args.get("field", "temperature_c")
-    site_id = request.args.get("site_id", "")
-
-    allowed = get_user_allowed_site_ids()
-    if site_id and allowed is not None and site_id not in allowed:
-        return jsonify(error="Access denied"), 403
 
     if period not in PERIOD_CFG:
         return jsonify(error="Invalid period"), 400
@@ -2149,15 +1170,6 @@ def api_readings():
     time_filter = cfg["filter"]
     bucket = cfg["bucket"]
 
-    site_filter = ""
-    if site_id:
-        site_filter = f" AND site_id = '{_escape_str_field(site_id)}'"
-    elif allowed is not None:
-        if not allowed:
-            return jsonify(readings=[], table=[], total=0)
-        escaped = ",".join(f"'{_escape_str_field(s)}'" for s in allowed)
-        site_filter = f" AND site_id IN ({escaped})"
-
     try:
         table = current_app.extensions["influx3"].query(
             f"SELECT "
@@ -2167,7 +1179,7 @@ def api_readings():
             f"  MAX({field})   AS max_val, "
             f"  COUNT({field}) AS sample_count "
             f"FROM readings "
-            f"WHERE {time_filter}{site_filter} "
+            f"WHERE {time_filter} "
             f"GROUP BY 1 ORDER BY 1 ASC"
         )
         if table is None:
@@ -2210,40 +1222,15 @@ def api_overview():
         Response: JSON with readings array and latest averages.
     """
     n = min(int(request.args.get("n", 20)), 100)
-    site_id = request.args.get("site_id", "")
-
-    allowed = get_user_allowed_site_ids()
-    if site_id and allowed is not None and site_id not in allowed:
-        return jsonify(error="Access denied"), 403
 
     try:
-        if site_id:
-            table = current_app.extensions["influx3"].query(
-                f"SELECT time, temperature_c, humidity_pct, co2_ppm, aqi "
-                f"FROM readings "
-                f"WHERE time >= now() - interval '2 hours' AND site_id = '{_escape_str_field(site_id)}' "
-                f"ORDER BY time DESC "
-                f"LIMIT {n}"
-            )
-        elif allowed is not None:
-            if not allowed:
-                return jsonify(readings=[], averages={})
-            escaped = ",".join(f"'{_escape_str_field(s)}'" for s in allowed)
-            table = current_app.extensions["influx3"].query(
-                f"SELECT time, temperature_c, humidity_pct, co2_ppm, aqi "
-                f"FROM readings "
-                f"WHERE time >= now() - interval '2 hours' AND site_id IN ({escaped}) "
-                f"ORDER BY time DESC "
-                f"LIMIT {n}"
-            )
-        else:
-            table = current_app.extensions["influx3"].query(
-                f"SELECT time, temperature_c, humidity_pct, co2_ppm, aqi "
-                f"FROM readings "
-                f"WHERE time >= now() - interval '2 hours' "
-                f"ORDER BY time DESC "
-                f"LIMIT {n}"
-            )
+        table = current_app.extensions["influx3"].query(
+            f"SELECT time, temperature_c, humidity_pct, co2_ppm, aqi "
+            f"FROM readings "
+            f"WHERE time >= now() - interval '2 hours' "
+            f"ORDER BY time DESC "
+            f"LIMIT {n}"
+        )
         if table is None:
             return jsonify(readings=[], averages={})
 
@@ -2251,6 +1238,7 @@ def api_overview():
         if df.empty:
             return jsonify(readings=[], averages={})
 
+        # Reverse so oldest first (for chart rendering)
         df = df.iloc[::-1].reset_index(drop=True)
 
         rows = []
@@ -2275,536 +1263,3 @@ def api_overview():
     except Exception as exc:
         current_app.logger.warning("Failed to query overview: %s", exc)
         return jsonify(readings=[], averages={})
-
-@bp.get("/api/sites")
-@login_required
-def api_sites():
-    """Return all sites with their latest live status for the overview page."""
-    sites = []
-    allowed = get_user_allowed_site_ids()
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                if allowed is None:
-                    cur.execute(
-                        "SELECT site_id, name, room_name, region, address "
-                        "FROM site ORDER BY name"
-                    )
-                else:
-                    if not allowed:
-                        return jsonify(sites=[])
-                    cur.execute(
-                        "SELECT site_id, name, room_name, region, address "
-                        "FROM site WHERE site_id = ANY(%s::uuid[]) ORDER BY name",
-                        (list(allowed),),
-                    )
-                for r in cur.fetchall():
-                    sid = str(r[0])
-                    latest = site_latest.get(sid, {})
-                    with _pending_lock:
-                        pending = _pending_alerts.get(sid)
-                    is_escalated = bool(pending and pending.get("escalated"))
-                    status = latest.get("status", "normal")
-                    if is_escalated:
-                        status = "escalated"
-                    sites.append({
-                        "site_id": sid,
-                        "name": r[1],
-                        "room_name": r[2],
-                        "region": r[3],
-                        "address": r[4] or "Substation Room",
-                        "status": status,
-                        "last_reading": latest.get("last_reading", "--"),
-                        "temperature_c": latest.get("temperature_c"),
-                        "humidity_pct": latest.get("humidity_pct"),
-                        "co2_ppm": latest.get("co2_ppm"),
-                        "aqi": latest.get("aqi"),
-                        "is_anomaly": latest.get("is_anomaly", False),
-                        "suppressed_occurrence_count": latest.get("suppressed_occurrence_count", 0),
-                        "escalated": is_escalated,
-                        "escalated_at": (pending["escalated_at"].isoformat()
-                                         if pending and pending.get("escalated_at") else None),
-                    })
-                # Fetch latest review per site (only active suppressions)
-                site_id_list = [s["site_id"] for s in sites]
-                reviews_map = _get_latest_reviews(conn, site_id_list)
-                for s in sites:
-                    rev = reviews_map.get(s["site_id"])
-                    s["suppressed"] = rev is not None
-                    s["last_reviewed_by"] = rev["reviewed_by"] if rev else None
-                    s["last_reviewed_at"] = rev["reviewed_at"] if rev else None
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load sites: %s", e)
-    return jsonify(sites=sites)
-
-_alert_suppression = {}
-
-
-def is_site_suppressed(site_id):
-    """Return True if the site is currently within a review-suppression window."""
-    until = _alert_suppression.get(site_id)
-    if until and datetime.now(timezone.utc) < until:
-        return True
-    _alert_suppression.pop(site_id, None)
-    _suppressed_alert_count.pop(site_id, None)
-    return False
-
-
-def _get_latest_reviews(conn, site_ids):
-    """Return dict mapping site_id -> latest review row only if still suppressed."""
-    if not site_ids:
-        return {}
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT ON (site_id) site_id, reviewed_by, reviewed_at, timeout_until "
-            "FROM anomaly_review WHERE site_id = ANY(%s::uuid[]) "
-            "  AND timeout_until IS NOT NULL AND timeout_until > now() "
-            "ORDER BY site_id, reviewed_at DESC",
-            (list(site_ids),),
-        )
-        return {
-            str(r[0]): {
-                "reviewed_by": r[1],
-                "reviewed_at": r[2].isoformat(),
-                "timeout_until": r[3].isoformat() if r[3] else None,
-            }
-            for r in cur.fetchall()
-        }
-
-
-@bp.post("/api/reviews")
-@login_required
-def submit_review():
-    """Submit an anomaly review for a site, storing the reviewer's notes."""
-    data = request.get_json(silent=True) or {}
-    site_id = (data.get("site_id") or "").strip()
-    comment = (data.get("comment") or "").strip()
-    timeout_minutes = data.get("timeout_minutes", 0)
-    severity = (data.get("severity") or "").strip()
-    status_at_review = (data.get("status_at_review") or "unknown").strip()
-
-    if not site_id:
-        return jsonify(error="site_id is required"), 400
-
-    try:
-        timeout_minutes = max(0, min(int(timeout_minutes), 1440))  # cap at 24h
-    except (TypeError, ValueError):
-        timeout_minutes = 0
-
-    reviewer_name = session.get("full_name", "Unknown")
-    user_id = session.get("user_id")
-
-    timeout_until = None
-    if timeout_minutes > 0:
-        timeout_until = datetime.now(timezone.utc) + timedelta(minutes=timeout_minutes)
-        _alert_suppression[site_id] = timeout_until
-        _suppressed_alert_count[site_id] = 0
-
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO anomaly_review "
-                    "(site_id, reviewed_by, user_id, status_at_review, comment, "
-                    " timeout_minutes, timeout_until, severity) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                    "RETURNING review_id, reviewed_at",
-                    (site_id, reviewer_name, user_id, status_at_review,
-                     comment or None, timeout_minutes,
-                     timeout_until.isoformat() if timeout_until else None,
-                     severity or None),
-                )
-                row = cur.fetchone()
-            conn.commit()
-        finally:
-            conn.close()
-
-        _clear_pending_alert(site_id)
-        write_audit_log(
-            action="alert.acknowledged",
-            old_setting={"status": status_at_review},
-            new_setting={
-                "site_id": site_id,
-                "severity": severity or None,
-                "timeout_minutes": timeout_minutes,
-            },
-        )
-
-        return jsonify(
-            success=True,
-            review_id=str(row[0]),
-            reviewed_at=row[1].isoformat(),
-            reviewed_by=reviewer_name,
-        ), 201
-
-    except Exception as e:
-        current_app.logger.warning("Failed to submit review: %s", e)
-        return jsonify(error="Failed to submit review"), 500
-
-
-@bp.get("/api/reviews/<site_id>")
-@login_required
-def get_reviews(site_id):
-    """Return the review log for a specific site, newest first."""
-    limit = min(int(request.args.get("limit", 50)), 200)
-    reviews = []
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT review_id, reviewed_by, reviewed_at, "
-                    "       status_at_review, comment, timeout_minutes, "
-                    "       timeout_until, severity "
-                    "FROM anomaly_review "
-                    "WHERE site_id = %s "
-                    "ORDER BY reviewed_at DESC LIMIT %s",
-                    (site_id, limit),
-                )
-                for r in cur.fetchall():
-                    reviews.append({
-                        "review_id": str(r[0]),
-                        "reviewed_by": r[1],
-                        "reviewed_at": r[2].isoformat(),
-                        "status_at_review": r[3],
-                        "comment": r[4] or "",
-                        "timeout_minutes": r[5],
-                        "timeout_until": r[6].isoformat() if r[6] else None,
-                        "severity": r[7] or "",
-                    })
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to load reviews for %s: %s", site_id, e)
-        return jsonify(error="Failed to load reviews"), 500
-
-    return jsonify(reviews=reviews)
-
-
-@bp.post("/api/reviews/<site_id>/cancel")
-@login_required
-@role_required("asset_owner")
-def cancel_suppression(site_id):
-    """Admin-only: cancel an active suppression for a site and log it."""
-    _alert_suppression.pop(site_id, None)
-    _suppressed_alert_count.pop(site_id, None)
-
-    reviewer_name = session.get("full_name", "Unknown")
-    user_id = session.get("user_id")
-
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE anomaly_review SET timeout_until = now() "
-                    "WHERE site_id = %s AND timeout_until IS NOT NULL AND timeout_until > now()",
-                    (site_id,),
-                )
-                cur.execute(
-                    "INSERT INTO anomaly_review "
-                    "(site_id, reviewed_by, user_id, status_at_review, comment, "
-                    " timeout_minutes, timeout_until, severity) "
-                    "VALUES (%s, %s, %s, 'suppression_cancelled', "
-                    " 'Suppression cancelled by admin', 0, NULL, NULL) "
-                    "RETURNING review_id, reviewed_at",
-                    (site_id, reviewer_name, user_id),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        current_app.logger.warning("Failed to cancel suppression for %s: %s", site_id, e)
-        return jsonify(error="Failed to cancel suppression"), 500
-
-    _clear_pending_alert(site_id)
-    write_audit_log(
-        action="alert.suppression_cancelled",
-        old_setting=None,
-        new_setting={"site_id": site_id},
-    )
-
-    return jsonify(success=True)
-
-
-def _export_csv(table_name, select_cols, col_labels, filename_prefix):
-    """Shared helper for CSV exports."""
-    start_str = request.args.get("start", "").strip()
-    end_str = request.args.get("end", "").strip()
-
-    if not start_str or not end_str:
-        return jsonify(error="start and end query parameters are required"), 400
-
-    try:
-        start_dt = parse_timestamp(start_str)
-        end_dt = parse_timestamp(end_str)
-    except Exception:
-        return jsonify(error="Invalid date format."), 400
-
-    if end_dt <= start_dt:
-        return jsonify(error="end must be after start"), 400
-
-    start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    sql = (
-        f"SELECT {select_cols} "
-        f"FROM {table_name} "
-        f"WHERE time >= '{start_iso}' AND time <= '{end_iso}' "
-        f"ORDER BY time ASC"
-    )
-
-    try:
-        result = current_app.extensions["influx3"].query(sql)
-        if result is None:
-            return jsonify(error="No data found for the selected range"), 404
-
-        df = result.to_pandas()
-        if df.empty:
-            return jsonify(error="No data found for the selected range"), 404
-
-        if "time" in df.columns:
-            df["time"] = pd.to_datetime(df["time"], utc=True).dt.strftime("%Y-%m-%d %H:%M:%S")
-
-        df = df.rename(columns={k: v for k, v in col_labels.items() if k in df.columns})
-
-        output = io.StringIO()
-        df.to_csv(output, index=False)
-        csv_bytes = output.getvalue().encode("utf-8")
-
-        filename = f"{filename_prefix}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
-        return Response(
-            csv_bytes,
-            mimetype="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
-        )
-
-    except Exception as exc:
-        current_app.logger.warning("CSV export failed: %s", exc)
-        return jsonify(error="Failed to export data"), 500
-
-
-@bp.get("/api/export/sensors")
-@login_required
-def export_sensors_csv():
-    """Export sensor readings within a time range as a downloadable CSV."""
-    field = request.args.get("field", "").strip()
-    if field and field not in ALLOWED_FIELDS:
-        return jsonify(error="Invalid field"), 400
-
-    cols = f"time, device_id, {field}" if field else "time, device_id, temperature_c, humidity_pct, co2_ppm, aqi"
-    labels = {
-        "time": "Timestamp (UTC)", "device_id": "Device ID",
-        "temperature_c": "Temperature (°C)", "humidity_pct": "Humidity (%)",
-        "co2_ppm": "CO2 (ppm)", "aqi": "Air Quality Index",
-    }
-    return _export_csv("readings", cols, labels, "sensor_readings")
-
-
-@bp.get("/api/export/thermal")
-@login_required
-def export_thermal_csv():
-    """Export thermal image metadata within a time range as a downloadable CSV."""
-    labels = {
-        "time": "Timestamp (UTC)", "camera_id": "Camera ID",
-        "filename": "Filename", "size_bytes": "File Size (bytes)",
-        "content_type": "Content Type",
-    }
-    return _export_csv(
-        "camera_images",
-        "time, camera_id, filename, size_bytes, content_type",
-        labels, "thermal_images",
-    )
-    
-@bp.get("/api/get/")
-@login_required
-def get_sensor_values():
-    """Return raw sensor readings in a time window, including site names.
-
-    Query params:
-        start (str, optional): ISO8601 or epoch start timestamp.
-        end (str, optional): ISO8601 or epoch end timestamp.
-        scope (int, optional): Minutes to look back when ``start`` is omitted.
-            If ``end`` is also omitted, the current UTC time is used.
-        site_name (str, optional): Site name to restrict results.
-        limit (int, optional): Max rows to return, default 5000, max 10000.
-
-    Returns:
-        Response: JSON payload with site metadata and matching sensor rows.
-    """
-    start_str = request.args.get("start", "").strip()
-    end_str = request.args.get("end", "").strip()
-    scope_arg = request.args.get("scope", "").strip()
-    site_name_arg = request.args.get("site_name", "").strip()
-    limit_arg = request.args.get("limit", "5000").strip()
-
-    if not start_str and not scope_arg:
-        return jsonify(error="start or scope query parameter is required"), 400
-
-    if end_str:
-        try:
-            end_dt = parse_timestamp(end_str)
-        except Exception:
-            return jsonify(error="Invalid date format."), 400
-    else:
-        end_dt = datetime.now(timezone.utc)
-
-    if start_str:
-        try:
-            start_dt = parse_timestamp(start_str)
-        except Exception:
-            return jsonify(error="Invalid start date format."), 400
-    else:
-        try:
-            scope_minutes = int(scope_arg)
-        except (TypeError, ValueError):
-            return jsonify(error="scope must be an integer number of minutes"), 400
-        if scope_minutes <= 0:
-            return jsonify(error="scope must be greater than 0"), 400
-        start_dt = end_dt - timedelta(minutes=scope_minutes)
-
-    if end_dt <= start_dt:
-        return jsonify(error="end must be after start"), 400
-
-    try:
-        limit = max(1, min(int(limit_arg), 10000))
-    except (TypeError, ValueError):
-        return jsonify(error="limit must be an integer"), 400
-
-    allowed = get_user_allowed_site_ids()
-
-    start_iso = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_iso = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    site_rows = []
-    try:
-        conn = _get_pg_conn()
-        try:
-            with conn.cursor() as cur:
-                if allowed is None:
-                    cur.execute("SELECT site_id, name FROM site ORDER BY name")
-                else:
-                    if not allowed:
-                        return jsonify(
-                            site_id=None,
-                            site_name=None,
-                            start=start_iso,
-                            end=end_iso,
-                            readings=[],
-                            total=0,
-                        )
-                    cur.execute(
-                        "SELECT site_id, name FROM site "
-                        "WHERE site_id = ANY(%s::uuid[]) ORDER BY name",
-                        (list(allowed),),
-                    )
-                site_rows = cur.fetchall()
-        finally:
-            conn.close()
-    except Exception as exc:
-        current_app.logger.warning("Failed to load site names for sensor query: %s", exc)
-        return jsonify(error="Failed to load site metadata"), 500
-
-    site_map = {str(row[0]): row[1] for row in site_rows}
-    selected_site_id = None
-    selected_site_name = None
-
-    if site_name_arg:
-        site_name_arg_lower = site_name_arg.lower()
-        for row in site_rows:
-            row_site_id = str(row[0])
-            row_site_name = row[1]
-            if row_site_name and row_site_name.lower() == site_name_arg_lower:
-                selected_site_id = row_site_id
-                selected_site_name = row_site_name
-                break
-        if not selected_site_id:
-            return jsonify(error="Unknown site_name"), 404
-
-    site_filter = ""
-    if selected_site_id:
-        site_filter = f" AND site_id = '{_escape_str_field(selected_site_id)}'"
-    elif allowed is not None:
-        escaped = ",".join(f"'{_escape_str_field(s)}'" for s in site_map)
-        if not escaped:
-            return jsonify(
-                site_id=None,
-                site_name=None,
-                start=start_iso,
-                end=end_iso,
-                readings=[],
-                total=0,
-            )
-        site_filter = f" AND site_id IN ({escaped})"
-
-    sql = (
-        "SELECT time, site_id, device_id, temperature_c, humidity_pct, co2_ppm, aqi "
-        "FROM readings "
-        f"WHERE time >= '{start_iso}' AND time <= '{end_iso}'{site_filter} "
-        "ORDER BY time ASC "
-        f"LIMIT {limit}"
-    )
-
-    try:
-        table = current_app.extensions["influx3"].query(sql)
-        if table is None:
-            return jsonify(
-                site_id=selected_site_id,
-                site_name=selected_site_name,
-                start=start_iso,
-                end=end_iso,
-                readings=[],
-                total=0,
-            )
-
-        df = table.to_pandas()
-        if df.empty:
-            return jsonify(
-                site_id=selected_site_id,
-                site_name=selected_site_name,
-                start=start_iso,
-                end=end_iso,
-                readings=[],
-                total=0,
-            )
-
-        readings = []
-        for _, row in df.iterrows():
-            row_site_id = str(row["site_id"]) if pd.notna(row["site_id"]) else None
-            device_id = str(row["device_id"]) if pd.notna(row["device_id"]) else None
-            reading_time = pd.to_datetime(row["time"], utc=True).isoformat().replace("+00:00", "Z")
-            readings.append({
-                "time": reading_time,
-                "site_id": row_site_id,
-                "site_name": site_map.get(row_site_id, row_site_id),
-                "device_id": device_id,
-                "temperature_c": float(row["temperature_c"]),
-                "humidity_pct": float(row["humidity_pct"]),
-                "co2_ppm": float(row["co2_ppm"]),
-                "aqi": float(row["aqi"]),
-            })
-
-        response = {
-            "site_id": selected_site_id,
-            "site_name": selected_site_name,
-            "start": start_iso,
-            "end": end_iso,
-            "limit": limit,
-            "readings": readings,
-            "total": len(readings),
-        }
-        if not selected_site_id:
-            response["sites"] = [
-                {"site_id": sid, "site_name": name}
-                for sid, name in site_map.items()
-            ]
-
-        return jsonify(response)
-
-    except Exception as exc:
-        current_app.logger.warning("Failed to query sensor values: %s", exc)
-        return jsonify(error="Failed to query sensor values"), 500

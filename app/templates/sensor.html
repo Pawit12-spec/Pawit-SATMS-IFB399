@@ -2,108 +2,91 @@
 
 {% block title %}{{ title }} | Dashboard{% endblock %}
 
-{% block sidebar_site_nav %}
-{% if site_info %}
-<div class="sidebar-site-label">{{ site_info.name }}</div>
-<a href="{{ url_for('main.dashboard', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/home-1-36x36.svg') }}" class="menu-icon" />
-  <span>OVERVIEW</span>
-</a>
-<a href="{{ url_for('main.temperature', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.temperature' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/thermometer-1-36x36.svg') }}" class="menu-icon" />
-  <span>TEMPERATURE</span>
-</a>
-<a href="{{ url_for('main.humidity', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.humidity' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/humidity-1-36x36.svg') }}" class="menu-icon" />
-  <span>HUMIDITY</span>
-</a>
-<a href="{{ url_for('main.co2', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.co2' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/carbon-dioxide-1-36x36.svg') }}" class="menu-icon" />
-  <span>CO2</span>
-</a>
-<a href="{{ url_for('main.air_quality', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.air_quality' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/wind-1-36x36.svg') }}" class="menu-icon" />
-  <span>AIR QUALITY</span>
-</a>
-{% endif %}
-{% endblock %}
-
 {% block main_class %}sensor-page-container{% endblock %}
 
 {% block content %}
 
-<link rel="stylesheet" href="{{ url_for('static', filename='sensor.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='sensor.css') }}"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<div id="sensor-page" data-field="{{ sensor_field }}" data-color="{{ sensor_color }}" data-units="{{ units }}"
-    data-chart-title="{{ chart_title }}" {% if site_info %}data-site-id="{{ site_info.site_id }}"{% endif %}>
+<div id="sensor-page"
+     data-field="{{ sensor_field }}"
+     data-color="{{ sensor_color }}"
+     data-units="{{ units }}"
+     data-chart-title="{{ chart_title }}">
 
-    <div class="site-breadcrumb">
-        <a href="{{ url_for('main.dashboard', site_id=site_info.site_id) if site_info else url_for('main.index') }}" class="breadcrumb-link">← Back</a>
-        <h1 class="sensor-page-title">{% block page_title %}{{ page_title }}{% endblock %}</h1>
-        <div class="site-switcher-wrap">
-            <span class="site-switcher-label">Substation</span>
-            <select id="site-switcher" class="period-dropdown site-switcher-select" aria-label="Switch substation">
-            </select>
+<div class="sensor-meta-row">
+    <span class="sensor-optimal-label">OPTIMAL {% block sensor_optimal_label %}{{ sensor_optimal_label }}{% endblock %}</span>
+    <span class="sensor-company-label">Energy Queensland</span>
+</div>
+
+<h1 class="sensor-page-title">{% block page_title %}{{ page_title }}{% endblock %}</h1>
+
+<div class="sensor-gauges-row" id="gaugesRow">
+    <div class="gauge-card">
+        <div class="gauge-value"><span id="sensor-current" class="card-value good">N/A</span><span
+                class="unit card-value good">{% block units %}{{ units }}{% endblock %}</span>
         </div>
+        <div class="gauge-label">Equipment 1</div>
+        <button class="gauge-edit-btn">Edit</button>
     </div>
 
-    <div class="sensor-stats-strip">
-        <div class="stat-block">
-            <span class="stat-label">Current</span>
-            <span class="stat-value">
-                <span id="sensor-current">N/A</span><span class="unit">{% block units %}{{ units }}{% endblock %}</span>
-            </span>
+    <div class="gauge-card">
+        <div class="gauge-value"><span id="sensor-avg" class="card-value good">N/A</span><span
+                class="unit card-value good">{{ units }}</span>
         </div>
-        <div class="stat-block">
-            <span class="stat-label">Average</span>
-            <span class="stat-value">
-                <span id="sensor-avg">N/A</span><span class="unit">{{ units }}</span>
-            </span>
-        </div>
-        <div class="stat-block">
-            <span class="stat-label">Optimal Range</span>
-            <span class="stat-value stat-value-sm">{% block sensor_optimal_label %}{{ sensor_optimal_label }}{% endblock %}</span>
-        </div>
+        <div class="gauge-label">Equipment 2</div>
+        <button class="gauge-edit-btn">Edit</button>
     </div>
 
-    <div class="chart-section">
-        <div class="chart-header">
-            <select class="period-dropdown" id="periodSelect">
-                <option value="day">DAY</option>
-                <option value="week">WEEK</option>
-                <option value="month">MONTH</option>
-                <option value="year">YEAR</option>
-            </select>
-            <span class="chart-title">{% block chart_title %}{{ chart_title }}{% endblock %} Throughout the Day</span>
+    <div class="gauge-card">
+        <div class="gauge-value"><span id="sensor-3" class="card-value good">N/A</span><span
+                class="unit card-value good">{{ units }}</span></div>
+        <div class="gauge-label">Equipment 3</div>
+        <button class="gauge-edit-btn">Edit</button>
+    </div>
+
+    <div class="gauge-card">
+        <div class="gauge-value"><span id="sensor-4" class="card-value good">N/A</span><span
+                class="unit card-value good">{{ units }}</span></div>
+        <div class="gauge-label">Equipment 4</div>
+        <button class="gauge-edit-btn">Edit</button>
+    </div>
+
+    <div class="gauge-card">
+        <div class="gauge-value"><span id="sensor-5" class="card-value good">N/A</span><span
+                class="unit card-value good">{{ units }}</span></div>
+        <div class="gauge-label">Equipment 5</div>
+        <button class="gauge-edit-btn">Edit</button>
+    </div>
+
+</div>
+
+<div class="chart-section">
+    <div class="chart-header">
+        <select class="period-dropdown" id="periodSelect">
+            <option value="day">DAY</option>
+            <option value="week">WEEK</option>
+            <option value="month">MONTH</option>
+            <option value="year">YEAR</option>
+        </select>
+        <span class="chart-title">{% block chart_title %}{{ chart_title }}{% endblock %} Throughout the Day</span>
+    </div>
+    <div class="chart-wrapper">
+        <div class="loading-overlay" id="chartLoading">
+            <div class="spinner"></div>
+            <span class="loading-text">Loading data...</span>
         </div>
-        <div class="chart-wrapper">
-            <div class="loading-overlay" id="chartLoading">
-                <div class="spinner"></div>
-                <span class="loading-text">Loading data...</span>
-            </div>
-            <canvas id="sensorChart"></canvas>
-        </div>
+        <canvas id="sensorChart"></canvas>
     </div>
 </div>
 <div class="table-section">
     <div class="table-header-row">
         <span class="table-title">Readings Log</span>
-        <div class="table-header-actions">
-            <div class="export-controls">
-                <label class="export-label" for="exportStart">From</label>
-                <input type="datetime-local" class="export-date-input" id="exportStart" />
-                <label class="export-label" for="exportEnd">To</label>
-                <input type="datetime-local" class="export-date-input" id="exportEnd" />
-                <button class="export-csv-btn" id="exportCsvBtn">Export to CSV</button>
-            </div>
-        </div>
+        <select class="equipment-dropdown" id="equipmentSelect">
+        </select>
     </div>
+
     <table class="sensor-data-table">
         <thead>
             <tr>
@@ -115,22 +98,12 @@
                 <th>STATUS</th>
             </tr>
         </thead>
+        <tbody id="sensorTableBody">
+        </tbody>
     </table>
-    <div class="table-scroll">
-        <table class="sensor-data-table">
-            <tbody id="sensorTableBody">
-            </tbody>
-        </table>
-    </div>
+</div>
 </div>
 <script src=" {{ url_for('static', filename='sensor.js') }}"></script>
-<script>
-  document.addEventListener('DOMContentLoaded', function () {
-    initSiteSwitcher(
-      document.getElementById('site-switcher'),
-      {{ site_info.site_id | tojson if site_info else 'null' }},
-      '{{ base_path }}'
-    );
-  });
-</script>
 {% endblock %}
+
+

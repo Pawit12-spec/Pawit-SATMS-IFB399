@@ -2,66 +2,26 @@
 
 {% block title %}Thermal View | Dashboard{% endblock %}
 
-{% block sidebar_site_nav %}
-{% if site_info %}
-<div class="sidebar-site-label">{{ site_info.name }}</div>
-<a href="{{ url_for('main.dashboard', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/home-1-36x36.svg') }}" class="menu-icon" />
-  <span>OVERVIEW</span>
-</a>
-<a href="{{ url_for('main.temperature', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.temperature' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/thermometer-1-36x36.svg') }}" class="menu-icon" />
-  <span>TEMPERATURE</span>
-</a>
-<a href="{{ url_for('main.humidity', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.humidity' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/humidity-1-36x36.svg') }}" class="menu-icon" />
-  <span>HUMIDITY</span>
-</a>
-<a href="{{ url_for('main.co2', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.co2' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/carbon-dioxide-1-36x36.svg') }}" class="menu-icon" />
-  <span>CO2</span>
-</a>
-<a href="{{ url_for('main.air_quality', site_id=site_info.site_id) }}"
-  class="menu-link {% if request.endpoint == 'main.air_quality' %}active{% endif %}">
-  <img src="{{ url_for('static', filename='img/wind-1-36x36.svg') }}" class="menu-icon" />
-  <span>AIR QUALITY</span>
-</a>
-{% endif %}
-{% endblock %}
-
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='sensor.css') }}" />
-<link rel="stylesheet" href="{{ url_for('static', filename='thermal.css') }}">
-</link>
+<link rel="stylesheet" href="{{ url_for('static', filename='thermal.css') }}"></link>
 
 <div class="substation-data-overview">
-    <div class="site-breadcrumb thermal-breadcrumb">
-        <a href="{{ url_for('main.dashboard', site_id=site_info.site_id) if site_info else url_for('main.index') }}" class="breadcrumb-link">← Back</a>
-        <h1 class="sensor-page-title">Thermal Image</h1>
-        <div class="site-switcher-wrap">
-            <span class="site-switcher-label">Substation</span>
-            <select id="site-switcher" class="period-dropdown site-switcher-select" aria-label="Switch substation">
-            </select>
-        </div>
-    </div>
     <div class="thermal-grid">
         <div class="card thermal-image-card">
             <div class="card-top">
-                <img class="card-label" src="{{ url_for('static', filename='img/Substation-Room.svg') }}" />
+                <img class="card-label" src="{{ url_for('static', filename='img/Substation-Room.svg') }}"/>
             </div>
             <div class="card-divider"></div>
-            <img id="thermal-image" class="thermal-img"
+                <img
+                id="thermal-image"
+                class="thermal-img"
                 src="{% if latest_image %}{{ url_for('main.uploaded_file', filename=latest_image.filename) }}{% endif %}"
-                alt="" />
+                alt=""/>
         </div>
         <div class="card thermal-info-card">
             <div class="card-top">
                 <div class="card-title">
-                    <img class="card-label" src="{{ url_for('static', filename='img/MAX-TEMP.svg') }}" />
+                    <img class="card-label" src="{{ url_for('static', filename='img/MAX-TEMP.svg') }}"/>
                 </div>
             </div>
             <div class="card-divider"></div>
@@ -76,7 +36,7 @@
         <div class="card thermal-info-card">
             <div class="card-top">
                 <div class="card-title">
-                    <img class="card-label" src="{{ url_for('static', filename='img/AVERAGE-TEMP.svg') }}" />
+                    <img class="card-label" src="{{ url_for('static', filename='img/AVERAGE-TEMP.svg') }}"/>
                 </div>
             </div>
             <div class="card-divider"></div>
@@ -91,7 +51,7 @@
         <div class="card thermal-info-card">
             <div class="card-top">
                 <div class="card-title">
-                    <img class="card-label" src="{{ url_for('static', filename='img/MIN-TEMP.svg') }}" />
+                    <img class="card-label" src="{{ url_for('static', filename='img/MIN-TEMP.svg') }}"/>
                 </div>
             </div>
             <div class="card-divider"></div>
@@ -106,7 +66,7 @@
         <div class="card thermal-info-card">
             <div class="card-top">
                 <div class="card-title">
-                    <img class="card-label" src="{{ url_for('static', filename='img/ANOMALIES.svg') }}" />
+                    <img class="card-label" src="{{ url_for('static', filename='img/ANOMALIES.svg') }}"/>
                 </div>
             </div>
             <div class="card-divider"></div>
@@ -119,40 +79,33 @@
             </div>
         </div>
     </div>
-    <div class="thermal-table-container">
+        <div class="thermal-table-container">
         <div class="thermal-title"></div>
-        <div class="export-controls thermal-export-controls">
-            <label class="export-label" for="exportStart">From</label>
-            <input type="datetime-local" class="export-date-input" id="exportStart" />
-            <label class="export-label" for="exportEnd">To</label>
-            <input type="datetime-local" class="export-date-input" id="exportEnd" />
-            <button class="export-csv-btn" id="exportCsvBtn">Export to CSV</button>
-        </div>
 
         <table class="thermal-table">
-            <thead>
-                <tr>
-                    <th class="card-col-label">THERMAL IMAGE</th> <!--Change CSS class later-->
-                    <th class="card-col-label">DATE & TIME</th> <!--Change CSS class later-->
-                </tr>
-            </thead>
-            <tbody id="image-table">
-                <!---------- Table will be populated with data from InfluxDB. ----------->
-                {% for row in recent_images %}
-                <tr>
-                    <td>
-                        <a href="{{ url_for('main.uploaded_file', filename=row.filename) }}" target="_blank">
-                            {{ row.filename }}
-                        </a>
-                    </td>
-                    <td>{{ row.time }}</td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="2">No thermal images found.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
+        <thead>
+            <tr>
+            <th class="card-col-label">THERMAL IMAGE</th> <!--Change CSS class later-->
+            <th class="card-col-label">DATE & TIME</th> <!--Change CSS class later-->
+            </tr>
+        </thead>
+        <tbody id="image-table">
+            <!---------- Table will be populated with data from InfluxDB. ----------->
+            {% for row in recent_images %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('main.uploaded_file', filename=row.filename) }}" target="_blank">
+                        {{ row.filename }}
+                    </a>
+                </td>
+                <td>{{ row.time }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2">No thermal images found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
         </table>
     </div>
 </div>
@@ -163,15 +116,4 @@
     };
 </script>
 <script src="{{ url_for('static', filename='thermal.js')}}"></script>
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
-        if (typeof initSiteSwitcher === 'function') {
-            initSiteSwitcher(
-                document.getElementById('site-switcher'),
-                {{ site_info.site_id | tojson if site_info else 'null' }},
-                '/thermal'
-            );
-        }
-    });
-</script>
 {% endblock %}

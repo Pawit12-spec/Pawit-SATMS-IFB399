@@ -61,8 +61,6 @@ if (es) {
 
         console.log("thermal_image event received:", data);
 
-        if (window.onThermalEvent) window.onThermalEvent(data);
-
         if (!data.filename) {
             return;
         }
@@ -100,5 +98,3 @@ if (es) {
         }
     });
 }
-
-initCsvExport('/api/export/thermal', 'thermal_images.csv');

@@ -1,67 +1,71 @@
     .sensor-page-container {
         height: calc(100vh - 64px);
-        overflow: hidden;
+        overflow-y: auto;
         flex: 1;
-        padding: 16px 20px 20px;
+        padding: 24px 28px;
         background: var(--bg-page);
-        display: flex;
-        flex-direction: column;
     }
 
-    #sensor-page {
+    .sensor-meta-row {
         display: flex;
-        flex-direction: column;
-        flex: 1;
-        min-height: 0;
-        gap: 10px;
-    }
-
-    .site-breadcrumb {
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
+        justify-content: space-between;
         align-items: center;
-        gap: 12px;
-        flex-shrink: 0;
-    }
-
-    .site-breadcrumb .breadcrumb-link {
-        justify-self: start;
-    }
-
-    .site-breadcrumb .site-switcher-wrap {
-        justify-self: end;
-    }
-
-    .breadcrumb-link {
+        margin-bottom: 6px;
         font-family: var(--font-heading);
-        font-size: 12px;
         font-weight: 700;
-        letter-spacing: 0.4px;
+    }
+
+    .sensor-optimal-label {
+        font-size: 12px;
         color: var(--text-secondary);
-        text-decoration: none;
+    }
+
+    .sensor-company-label {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-style: italic;
+    }
+
+    .sensor-page-title {
+        text-align: center;
+        font-family: var(--font-body);
+        font-weight: 700;
+        font-size: 48px;
+        letter-spacing: -0.08px;
+        color: var(--text-primary);
+        margin-bottom: 22px;
         text-transform: uppercase;
-        transition: color 0.15s;
     }
 
-    .breadcrumb-link:hover {
-        color: var(--bg-header);
+    .sensor-gauges-row {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 28px;
+        flex-wrap: wrap;
     }
 
-    .site-switcher-wrap {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
+    .gauge-card {
+        flex: 1;
+        min-width: 150px;
         background: var(--bg-card);
-        padding: 4px 6px 4px 12px;
-        border-radius: 6px;
+        border-radius: 12px;
+        padding: 16px 12px 36px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         box-shadow: var(--card-shadow);
+        position: relative;
     }
 
-    [data-theme="dark"] .site-switcher-wrap {
-        border: 1px solid var(--divider);
+    .gauge-value {
+        font-family: var(--font-body);
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 4px;
     }
 
-    .site-switcher-label {
+    .gauge-label {
         font-family: var(--font-heading);
         font-size: 10px;
         font-weight: 700;
@@ -70,117 +74,30 @@
         text-transform: uppercase;
     }
 
-    .site-switcher-select {
-        min-width: 180px;
-        font-weight: 700;
-    }
-
-    .sensor-page-title {
-        font-family: var(--font-body);
-        font-weight: 700;
-        font-size: 22px;
-        letter-spacing: 0.5px;
-        color: var(--text-primary);
-        margin: 0;
-        text-transform: uppercase;
-        text-align: center;
-        white-space: nowrap;
-    }
-
-    .sensor-stats-strip {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-        flex-shrink: 0;
-    }
-
-    .stat-block {
-        position: relative;
-        background: var(--bg-card);
-        border-radius: 8px;
-        padding: 10px 14px 10px 18px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        gap: 4px;
-        box-shadow: var(--card-shadow);
-        overflow: hidden;
-        min-width: 0;
-        min-height: 64px;
-        transition: var(--theme-transition);
-    }
-
-    .stat-block::before {
-        content: '';
+    .gauge-edit-btn {
         position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: var(--bg-header);
-    }
-
-    .stat-block:nth-child(2)::before {
-        background: var(--dot-warn, #f5c451);
-    }
-
-    .stat-block:nth-child(3)::before {
-        background: var(--dot-normal, #009390);
-    }
-
-    .stat-label {
-        font-family: var(--font-heading);
+        bottom: 10px;
+        right: 10px;
+        background: var(--divider);
+        border: none;
+        border-radius: 4px;
+        padding: 2px 8px;
         font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1.2px;
+        font-family: var(--font-heading);
+        cursor: pointer;
         color: var(--text-secondary);
-        text-transform: uppercase;
     }
 
-    .stat-value {
-        font-family: var(--font-body);
-        font-size: 24px;
-        font-weight: 700;
-        color: var(--text-primary);
-        display: inline-flex;
-        align-items: baseline;
-        line-height: 1.1;
+    .gauge-edit-btn:hover {
+        background: rgba(0, 0, 0, 0.06);
     }
 
-    .stat-value .unit {
-        font-size: 12px;
-        color: var(--text-secondary);
-        margin-left: 3px;
-        font-weight: 600;
-    }
-
-    .stat-value-sm {
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text-primary);
-        white-space: normal;
-        line-height: 1.15;
-        display: block;
-    }
-
-    [data-theme="dark"] .stat-block {
-        border: 1px solid var(--divider);
-    }
-
-    #sensor-page .chart-section {
+    .chart-section {
         background: var(--bg-card);
-        border-radius: 8px;
-        padding: 14px 16px;
+        border-radius: 12px;
+        padding: 20px;
         box-shadow: var(--card-shadow);
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        margin-bottom: 0;
-    }
-
-    [data-theme="dark"] #sensor-page .chart-section {
-        border: 1px solid var(--divider);
+        margin-bottom: 28px;
     }
 
     .chart-header {
@@ -190,34 +107,25 @@
         margin-bottom: 14px;
     }
 
-    .period-dropdown,
-    .equipment-dropdown {
+    .period-dropdown {
         appearance: none;
         -webkit-appearance: none;
         background: var(--bg-page);
         border: 1.5px solid var(--divider);
         border-radius: 6px;
+        padding: 6px 28px 6px 12px;
         font-size: 13px;
         font-weight: 700;
         font-family: var(--font-heading);
         color: var(--text-primary);
         cursor: pointer;
+        /* What is this lol */
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23555' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 10px center;
     }
 
-    .period-dropdown {
-        padding: 6px 28px 6px 12px;
-    }
-
-    .equipment-dropdown {
-        padding: 7px 30px 7px 14px;
-        min-width: 160px;
-    }
-
-    .period-dropdown:focus,
-    .equipment-dropdown:focus {
+    .period-dropdown:focus {
         outline: none;
         border-color: var(--bg-header);
     }
@@ -235,12 +143,10 @@
         height: 100%;
     }
 
-    #sensor-page .chart-section .chart-wrapper {
+    .chart-wrapper {
         position: relative;
         width: 100%;
-        flex: 1;
-        min-height: 0;
-        height: auto;
+        height: 250px;
     }
 
     .loading-overlay {
@@ -267,57 +173,36 @@
     .spinner {
         width: 28px;
         height: 28px;
-        border: 3px solid rgba(255, 255, 255, 0.2);
+        border: 3px solid rgba(255,255,255,0.2);
         border-top-color: #fff;
         border-radius: 50%;
         animation: spin 0.7s linear infinite;
     }
 
     @keyframes spin {
-        to {
-            transform: rotate(360deg);
-        }
+        to { transform: rotate(360deg); }
     }
 
     .loading-text {
         font-family: var(--font-heading);
         font-size: 12px;
         font-weight: 600;
-        color: rgba(255, 255, 255, 0.8);
+        color: rgba(255,255,255,0.8);
         letter-spacing: 0.5px;
     }
 
     .table-section {
         background: var(--bg-card);
-        border-radius: 8px;
-        padding: 12px 16px;
+        border-radius: 12px;
+        padding: 16px 20px;
         box-shadow: var(--card-shadow);
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        margin-top: 10px;
-    }
-
-    [data-theme="dark"] .table-section {
-        border: 1px solid var(--divider);
     }
 
     .table-header-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 10px;
-        flex-wrap: wrap;
-        flex-shrink: 0;
-    }
-
-    .table-scroll {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        border-top: 1px solid var(--divider);
+        margin-bottom: 14px;
     }
 
     .table-title {
@@ -328,12 +213,34 @@
         letter-spacing: 0.3px;
     }
 
+    .equipment-dropdown {
+        appearance: none;
+        -webkit-appearance: none;
+        background: var(--bg-page);
+        border: 1.5px solid var(--divider);
+        border-radius: 6px;
+        padding: 7px 30px 7px 14px;
+        font-size: 13px;
+        font-weight: 700;
+        font-family: var(--font-heading);
+        color: var(--text-primary);
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23555' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        min-width: 160px;
+    }
+
+    .equipment-dropdown:focus {
+        outline: none;
+        border-color: var(--bg-header);
+    }
+
     .sensor-data-table {
         width: 100%;
         border-collapse: collapse;
         font-family: var(--font-heading);
         font-size: 13px;
-        table-layout: fixed;
     }
 
     .sensor-data-table thead tr {
@@ -356,7 +263,7 @@
     }
 
     .sensor-data-table tbody tr:hover {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(255,255,255,0.03);
     }
 
     .sensor-data-table tbody td {
@@ -388,11 +295,11 @@
     }
 
     .status-normal {
-        background: rgba(0, 147, 144, 0.12);
-        color: var(--dot-normal, #009390);
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
     }
 
     .status-warning {
-        background: rgba(220, 88, 88, 0.14);
-        color: var(--dot-bad, #dc5858);
+        background: rgba(231, 76, 60, 0.15);
+        color: #e74c3c;
     }

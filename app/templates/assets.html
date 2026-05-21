@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Assets | Dashboard{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='userassets.css') }}"></link>
+<div id="assets-page-root" class="substation-data-overview">
+  <span class="page-title">ASSETS</span>
+
+  {% if request.args.get('error') %}
+  <div class="users-alert users-alert-error">{{ request.args.get('error') }}</div>
+  {% endif %}
+  {% if request.args.get('success') %}
+  <div class="users-alert users-alert-success">{{ request.args.get('success') }}</div>
+  {% endif %}
+
+  <div class="users-layout">
+    <section class="card users-form-card">
+      <div class="card-top">
+        <div class="card-title">
+          <span class="users-card-heading">Create New Site</span>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <form method="POST" action="{{ url_for('main.create_asset') }}" class="users-form">
+        <div class="login-field">
+          <label for="name">Site Name *</label>
+          <input type="text" id="name" name="name" required />
+        </div>
+        <div class="login-field">
+          <label for="room_name">Room Name</label>
+          <input type="text" id="room_name" name="room_name" />
+        </div>
+        <div class="login-field">
+          <label for="region">Region</label>
+          <input type="text" id="region" name="region" />
+        </div>
+        <div class="login-field">
+          <label for="address">Address</label>
+          <input type="text" id="address" name="address" />
+        </div>
+        <div class="login-field">
+          <label for="latitude">Latitude</label>
+          <input type="number" id="latitude" name="latitude" step="0.000001" min="-90" max="90" />
+        </div>
+        <div class="login-field">
+          <label for="longitude">Longitude</label>
+          <input type="number" id="longitude" name="longitude" step="0.000001" min="-180" max="180" />
+        </div>
+        <button type="submit" class="login-btn">Create Site</button>
+      </form>
+    </section>
+
+    <section class="card users-table-card">
+      <div class="card-top">
+        <div class="card-title">
+          <span class="users-card-heading">Current Sites</span>
+        </div>
+        <span class="users-count">{{ sites | length }} site{{ 's' if sites | length != 1 }}</span>
+      </div>
+      <div class="card-divider"></div>
+      <div style="overflow-x:auto;">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Room</th>
+              <th>Region</th>
+              <th>Address</th>
+              <th>Lat</th>
+              <th>Long</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in sites %}
+            <tr>
+              <td>{{ s.name }}</td>
+              <td>{{ s.room_name or '-' }}</td>
+              <td>{{ s.region or '-' }}</td>
+              <td>{{ s.address or '-' }}</td>
+              <td>{{ s.latitude if s.latitude is not none else '-' }}</td>
+              <td>{{ s.longitude if s.longitude is not none else '-' }}</td>
+              <td>
+                <button type="button" class="login-btn asset-edit-btn" style="padding:4px 10px;font-size:0.85rem;"
+                        data-id="{{ s.site_id }}"
+                        data-name="{{ s.name }}"
+                        data-room="{{ s.room_name or '' }}"
+                        data-region="{{ s.region or '' }}"
+                        data-address="{{ s.address or '' }}"
+                        data-lat="{{ s.latitude if s.latitude is not none else '' }}"
+                        data-lng="{{ s.longitude if s.longitude is not none else '' }}">
+                  Edit
+                </button>
+              </td>
+              <td>
+                <form method="POST" action="{{ url_for('main.delete_asset', site_id=s.site_id) }}"
+                      onsubmit="return confirm('Delete site {{ s.name }}?')">
+                  <button type="submit" class="users-delete-btn">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not sites %}
+            <tr><td colspan="8" class="users-empty">No sites found</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+ 
+<div class="users-edit-backdrop"></div>
+  <div class="users-edit-overlay">
+    <div class="assets-edit-modal">
+      <button type="button" class="users-edit-close" onclick="closeEditModal()">&times;</button>
+      <h3>Edit Site</h3>
+      <form id="edit-form" method="POST" class="users-edit-form">
+        <div class="login-field">
+          <label>Site Name *</label>
+          <input type="text" name="name" id="edit-name" required />
+        </div>
+        <div class="login-field">
+          <label>Room Name</label>
+          <input type="text" name="room_name" id="edit-room_name" />
+        </div>
+        <div class="login-field">
+          <label>Region</label>
+          <input type="text" name="region" id="edit-region" />
+        </div>
+        <div class="login-field">
+          <label>Address</label>
+          <input type="text" name="address" id="edit-address" />
+        </div>
+        <div class="login-field">
+          <label>Latitude</label>
+          <input type="number" name="latitude" id="edit-latitude" step="0.000001" min="-90" max="90" />
+        </div>
+        <div class="login-field">
+          <label>Longitude</label>
+          <input type="number" name="longitude" id="edit-longitude" step="0.000001" min="-180" max="180" />
+        </div>
+        <div class="users-edit-actions">
+          <button type="button" class="users-delete-btn" onclick="closeEditModal()">Cancel</button>
+          <button type="submit" class="login-btn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function openEditModal(id, name, room, region, address, lat, lng) {
+    document.getElementById('edit-form').action = '/assets/' + id + '/edit';
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-room_name').value = room;
+    document.getElementById('edit-region').value = region;
+    document.getElementById('edit-address').value = address;
+    document.getElementById('edit-latitude').value = lat;
+    document.getElementById('edit-longitude').value = lng;
+    document.getElementById('assets-page-root').classList.add('edit-open');
+  }
+  function closeEditModal() {
+    document.getElementById('assets-page-root').classList.remove('edit-open');
+  }
+  document.querySelectorAll('.asset-edit-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openEditModal(
+        this.dataset.id, this.dataset.name, this.dataset.room,
+        this.dataset.region, this.dataset.address,
+        this.dataset.lat, this.dataset.lng
+      );
+    });
+  });
+  document.querySelector('#assets-page-root .users-edit-backdrop').addEventListener('click', closeEditModal);
+</script>
+{% endblock %}

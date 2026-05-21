@@ -1,0 +1,355 @@
+.users-role-select {
+    width: auto;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.users-role-form {
+    display: inline;
+}
+
+.users-role-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.users-role-badge.owner {
+    background: var(--bg-header);
+    color: var(--text-on-brand);
+}
+
+#users-page-root {
+    position: relative;
+}
+
+.users-edit-backdrop {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background: rgba(4, 7, 20, 0.55);
+    backdrop-filter: blur(9px);
+    transition: opacity 160ms ease;
+    pointer-events: none;
+    z-index: 9;
+}
+
+#users-page-root.edit-open .users-edit-backdrop,
+#assets-page-root.edit-open .users-edit-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.users-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    z-index: 10;
+}
+
+#users-page-root.edit-open .users-edit-overlay,
+#assets-page-root.edit-open .users-edit-overlay {
+    display: flex;
+}
+
+.users-edit-modal {
+    width: min(960px, 100%);
+    background: var(--bg-card, #fff);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(6, 8, 32, 0.45);
+    padding: 1.75rem;
+    position: relative;
+
+}
+
+.assets-edit-modal {
+    width: min(480px, 100%);
+    background: var(--card-bg, #fff);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(6, 8, 32, 0.45);
+    padding: 1.75rem;
+    position: relative;
+}
+
+.users-edit-modal h3,
+.assets-edit-modal h3 {
+    margin: 0 0 1.25rem 0;
+    font-size: 1.35rem;
+    font-family: var(--font-heading)
+}
+
+.users-edit-form .login-field label {
+    font-size: 0.85rem;
+}
+
+.users-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.users-edit-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    border: none;
+    background: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+
+.users-edit-title h3 {
+    color: var(--text-primary);
+}
+
+.modal-divider {
+    height: 1px;
+    background: var(--divider);
+    margin: 14px 0 18px;
+}
+
+.users-edit-modal-content {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    margin-top: 1rem;
+}
+
+.users-edit-details {
+    flex: 0 0 360px;
+}
+
+.users-edit-vertical-divider {
+    width: 1px;
+    background: var(--divider, #e6e6e6);
+    align-self: stretch;
+}
+
+.update-assets {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.update-assets table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.update-assets table th,
+.update-assets table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--divider, #e6e6e6);
+    text-align: left;
+}
+
+.update-assets table th {
+    font-family: var(--font-heading, Arial);
+    font-size: 13px;
+}
+
+.update-assets-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.update-assets-controls select {
+    flex: 1;
+    margin: 0;
+}
+
+.update-assets-controls .asset-submit-btn {
+    flex: 0 0 auto;
+    padding: 7px 8px;
+    background-color: #009390;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    color: #fff;
+}
+
+.users-assets-select {
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: var(--font-ui);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.users-layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 32px;
+    width: 100%;
+    max-width: 1200px;
+    align-items: start;
+}
+
+@media (max-width: 900px) {
+    .users-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.users-card-heading {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text-primary);
+}
+
+.users-form-card {
+    min-height: auto;
+}
+
+.users-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.users-count {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.users-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.users-table th {
+    font-family: var(--font-heading);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.users-table td {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.users-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.users-status {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.users-status.active {
+    background: var(--dot-ok);
+    color: #000;
+}
+
+.users-status.inactive {
+    background: var(--divider);
+    color: var(--text-secondary);
+}
+
+.users-delete-btn,
+.asset-remove-btn {
+    background: none;
+    border: 1px solid var(--dot-bad);
+    color: var(--dot-bad);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.users-delete-btn:hover {
+    background: var(--dot-bad);
+    color: #fff;
+}
+
+.users-you-label {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.users-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 12px;
+}
+
+.users-alert {
+    width: 100%;
+    max-width: 1200px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-family: var(--font-heading);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.users-alert-error {
+    background: var(--dot-bad);
+    color: #fff;
+}
+
+.users-alert-success {
+    background: var(--dot-ok);
+    color: #000;
+}
+
+.users-role-select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: var(--font-ui);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.user-edit-btn {
+    width: 100%;
+    padding: 6px;
+    background: #009390;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 8px;
+}

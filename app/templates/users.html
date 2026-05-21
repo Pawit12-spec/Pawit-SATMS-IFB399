@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Users | Dashboard{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='userassets.css') }}"></link>
+<div class="substation-data-overview"
+     id="users-page-root"
+     data-assets-url="{{ url_for('main.get_all_assets') }}">
+  <span class="page-title">MANAGE USERS</span>
+
+  {% if request.args.get('error') %}
+  <div class="users-alert users-alert-error">{{ request.args.get('error') }}</div>
+  {% endif %}
+  {% if request.args.get('success') %}
+  <div class="users-alert users-alert-success">{{ request.args.get('success') }}</div>
+  {% endif %}
+
+  <div class="users-layout">
+    <section class="card users-form-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Create New User</span>
+          </div>
+        </div>
+        <div class="card-divider"></div>
+        <form method="POST" action="{{ url_for('main.create_user') }}" class="users-form">
+          <div class="login-field">
+            <label for="full_name">Full Name</label>
+            <input type="text" id="full_name" name="full_name" required />
+          </div>
+          <div class="login-field">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required />
+          </div>
+          <div class="login-field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required minlength="4" />
+          </div>
+          <div class="login-field">
+            <label for="role">Role</label>
+            <select id="role" name="role" class="login-field-select">
+              <option value="user">User</option>
+              <option value="asset_owner">Asset Owner</option>
+            </select>
+          </div>
+          <button type="submit" class="login-btn">Create User</button>
+        </form>
+      </section>
+
+    <section class="card users-table-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Current Users</span>
+          </div>
+          <span class="users-count">{{ users | length }} user{{ 's' if users | length != 1 }}</span>
+        </div>
+        <div class="card-divider"></div>
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td>{{ u.full_name }}</td>
+              <td>{{ u.email }}</td>
+              <td>
+                {% if u.user_id != session.get('user_id') %}
+                <form method="POST" action="{{ url_for('main.update_role', user_id=u.user_id) }}" class="users-role-form">
+                  <select name="role" class="users-role-select" onchange="this.form.submit()">
+                    <option value="user" {{ 'selected' if u.role == 'user' }}>User</option>
+                    <option value="asset_owner" {{ 'selected' if u.role == 'asset_owner' }}>Asset Owner</option>
+                  </select>
+                </form>
+                {% else %}
+                <span class="users-role-badge owner">Asset Owner</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="users-status {{ 'active' if u.is_active else 'inactive' }}">
+                  {{ 'Active' if u.is_active else 'Inactive' }}
+                </span>
+              </td>
+              <td>
+                {% if u.user_id != session.get('user_id') %}
+                <form method="POST" action="{{ url_for('main.delete_user', user_id=u.user_id) }}"
+                      onsubmit="return confirm('Delete {{ u.full_name }}?')">
+                  <button type="submit" class="users-delete-btn">Delete</button>
+                </form>
+                {% else %}
+                <span class="users-you-label">You</span>
+                {% endif %}
+              </td>
+              <td>
+                <button type="button"
+                        class="user-edit-btn"
+                        data-user-id="{{ u.user_id }}"
+                        data-full-name="{{ u.full_name }}"
+                        data-email="{{ u.email }}"
+                        data-role="{{ u.role }}"
+                        data-submit-url="{{ url_for('main.update_user', user_id=u.user_id) }}"
+                        data-assets-url="{{ url_for('main.get_user_assets', user_id=u.user_id) }}"
+                        data-assign-url="{{ url_for('main.update_user_assets', user_id=u.user_id) }}"
+                        data-remove-url="{{ url_for('main.remove_user_asset', user_id=u.user_id) }}">
+                  Edit
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not users %}
+            <tr><td colspan="6" class="users-empty">No users found</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </section>
+  </div>
+
+  <div class="users-edit-backdrop" id="users-edit-backdrop" aria-hidden="true"></div>
+  <div class="users-edit-overlay" id="users-edit-overlay" aria-hidden="true">
+    <div class="users-edit-modal" role="dialog" aria-modal="true" aria-labelledby="users-edit-title">
+      <button type="button" class="users-edit-close" id="users-edit-close" aria-label="Close edit form">&times;</button>
+      <h3 class="users-edit-title" id="users-edit-title">Edit User</h3>
+      <div class="users-edit-modal-content">
+        <div class="users-edit-details">
+          <form method="POST" class="users-form users-edit-form" id="users-edit-form">
+            <input type="hidden" name="user_id" id="edit-user-id" />
+            <div class="login-field">
+              <label for="edit-full-name">Full Name</label>
+              <input type="text" id="edit-full-name" name="full_name" required />
+            </div>
+            <div class="login-field">
+              <label for="edit-email">Email</label>
+              <input type="email" id="edit-email" name="email" required />
+            </div>
+            <div class="login-field">
+              <label for="edit-role">Role</label>
+              <select id="edit-role" name="role" class="login-field-select">
+                <option value="user">User</option>
+                <option value="asset_owner">Asset Owner</option>
+              </select>
+            </div>
+            <div class="users-edit-actions">
+              <button type="button" class="users-delete-btn" id="users-edit-cancel">Cancel</button>
+              <button type="submit" class="login-btn">Save Changes</button>
+            </div>
+          </form>
+        </div>
+        <div class="users-edit-vertical-divider" aria-hidden="true"></div>
+        <div class="update-assets">
+          <div class="modal-divider"></div>
+          <div class="update-assets-controls">
+            <select id="user-assets-select" class="users-assets-select">
+              <option disabled selected value="">Loading assets...</option>
+            </select>
+            <button type="button" class="asset-submit-btn">Submit</button>
+          </div>
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>ID</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="user-assets-table-body">
+              <tr>
+                <td colspan="3" class="users-empty">Select a user to view assets</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var root = document.getElementById('users-page-root');
+    if (!root) return;
+
+    var overlay = document.getElementById('users-edit-overlay');
+    var backdrop = document.getElementById('users-edit-backdrop');
+    var form = document.getElementById('users-edit-form');
+    var title = document.getElementById('users-edit-title');
+    var assetsSelect = document.getElementById('user-assets-select');
+    var assetsTableBody = document.getElementById('user-assets-table-body');
+    var allAssetsData = [];
+    var assetsEndpoint = root.dataset.assetsUrl || '';
+    var assetSubmitBtn = document.querySelector('.asset-submit-btn');
+    var currentAssetsAssignUrl = null;
+    var currentUserAssetsUrl = null;
+    var currentAssetsRemoveUrl = null;
+
+    function getAssetName(asset) {
+      return asset && (asset.asset_name || asset.name || 'Unnamed Asset');
+    }
+
+    var inputs = {
+      userId: document.getElementById('edit-user-id'),
+      name: document.getElementById('edit-full-name'),
+      email: document.getElementById('edit-email'),
+      role: document.getElementById('edit-role')
+    };
+    var closeBtn = document.getElementById('users-edit-close');
+    var cancelBtn = document.getElementById('users-edit-cancel');
+
+    function setAssetsLoading(message) {
+      assetsTableBody.innerHTML = '<tr><td colspan="3" class="users-empty">' + message + '</td></tr>';
+    }
+
+    function populateAssetsSelect(emptyMessage) {
+      if (!assetsSelect) return;
+      assetsSelect.innerHTML = '';
+      if (!allAssetsData.length) {
+        var emptyOpt = document.createElement('option');
+        emptyOpt.disabled = true;
+        emptyOpt.selected = true;
+        emptyOpt.textContent = emptyMessage || 'No assets available';
+        assetsSelect.appendChild(emptyOpt);
+        return;
+      }
+
+      var placeholder = document.createElement('option');
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      placeholder.textContent = 'Select an asset';
+      assetsSelect.appendChild(placeholder);
+
+      allAssetsData.forEach(function(asset) {
+        var name = getAssetName(asset);
+        var id = asset.asset_id || asset.site_id || '';
+        if (!id) return;
+        var opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = name;
+        assetsSelect.appendChild(opt);
+      });
+    }
+
+    function fetchAllAssets() {
+      if (!assetsEndpoint) {
+        populateAssetsSelect('No assets endpoint configured');
+        return;
+      }
+      fetch(assetsEndpoint, { headers: { 'Accept': 'application/json' } })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Failed to fetch assets');
+          return res.json();
+        })
+        .then(function(data) {
+          allAssetsData = data && Array.isArray(data.assets) ? data.assets : [];
+          populateAssetsSelect();
+        })
+        .catch(function() {
+          allAssetsData = [];
+          populateAssetsSelect('Unable to load assets');
+        });
+    }
+
+    function populateAssetsTable(assets) {
+      if (!assetsTableBody) return;
+      if (!assets.length) {
+        setAssetsLoading('No assets assigned');
+        return;
+      }
+      assetsTableBody.innerHTML = assets.map(function(asset) {
+        var id = asset.asset_id;
+        return '<tr>' +
+          '<td>' + asset.asset_name + '</td>' +
+          '<td>' + asset.asset_id + '</td>' +
+          '<td><button type="button" class="asset-remove-btn" data-asset-id="' + id + '" data-asset-name="' + asset.asset_name + '">Remove</button></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function loadUserAssets(url) {
+      if (!url || !assetsTableBody) return;
+      setAssetsLoading('Loading assets...');
+      fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Failed to fetch assets');
+          return res.json();
+        })
+        .then(function(data) {
+          var assets = data && data.assets ? data.assets : [];
+          populateAssetsTable(assets);
+        })
+        .catch(function() {
+          setAssetsLoading('Unable to load assets');
+          populateAssetsSelect('Unable to load assets');
+        });
+    }
+
+    function openModal(btn) {
+      inputs.userId.value = btn.dataset.userId || '';
+      inputs.name.value = btn.dataset.fullName || '';
+      inputs.email.value = btn.dataset.email || '';
+      inputs.role.value = btn.dataset.role || 'user';
+      form.action = btn.dataset.submitUrl || '';
+      currentAssetsAssignUrl = btn.dataset.assignUrl || '';
+      currentUserAssetsUrl = btn.dataset.assetsUrl || '';
+      currentAssetsRemoveUrl = btn.dataset.removeUrl || '';
+
+      if (assetSubmitBtn) assetSubmitBtn.disabled = true;
+      if (assetsSelect) assetsSelect.selectedIndex = 0;
+      title.textContent = btn.dataset.fullName ? 'Edit ' + btn.dataset.fullName : 'Edit User';
+      loadUserAssets(currentUserAssetsUrl);
+
+      overlay.setAttribute('aria-hidden', 'false');
+      root.classList.add('edit-open');
+    }
+
+    function closeModal() {
+      overlay.setAttribute('aria-hidden', 'true');
+      root.classList.remove('edit-open');
+      form.reset();
+    }
+
+    document.querySelectorAll('.user-edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        openModal(btn);
+      });
+    });
+
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', function(event) {
+      event.preventDefault();
+      closeModal();
+    });
+
+    overlay.addEventListener('click', function(event) {
+      if (event.target === overlay) {
+        closeModal();
+      }
+    });
+
+    if (backdrop) {
+      backdrop.addEventListener('click', closeModal);
+    }
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && root.classList.contains('edit-open')) {
+        closeModal();
+      }
+    });
+
+    if (assetsSelect) {
+      assetsSelect.addEventListener('change', function() {
+        if (!assetSubmitBtn) return;
+        assetSubmitBtn.disabled = !assetsSelect.value;
+      });
+    }
+
+    if (assetSubmitBtn) {
+      assetSubmitBtn.addEventListener('click', function() {
+        if (!currentAssetsAssignUrl || !assetsSelect || !assetsSelect.value) return;
+        assetSubmitBtn.disabled = true;
+        assetSubmitBtn.textContent = 'Saving...';
+        fetch(currentAssetsAssignUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ asset_id: assetsSelect.value })
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Request failed');
+          return res.json();
+        })
+        .then(function() {
+          if (currentUserAssetsUrl) loadUserAssets(currentUserAssetsUrl);
+        })
+        .catch(function() {
+          setAssetsLoading('Unable to update assets');
+        })
+        .finally(function() {
+          assetSubmitBtn.disabled = false;
+          assetSubmitBtn.textContent = 'Submit';
+        });
+      });
+    }
+
+    if (assetsTableBody) {
+      assetsTableBody.addEventListener('click', function(event) {
+        var btn = event.target.closest('.asset-remove-btn');
+        if (!btn) return;
+        var assetId = btn.dataset.assetId;
+        if (!assetId || !currentAssetsRemoveUrl) return;
+        var assetName = btn.dataset.assetName || 'this asset';
+        if (!window.confirm('Remove ' + assetName + ' from this user?')) {
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Removing...';
+        fetch(currentAssetsRemoveUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ asset_id: assetId })
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Request failed');
+          return res.json();
+        })
+        .then(function() {
+          if (currentUserAssetsUrl) loadUserAssets(currentUserAssetsUrl);
+        })
+        .catch(function() {
+          btn.disabled = false;
+          btn.textContent = 'Remove';
+        });
+      });
+    }
+
+    fetchAllAssets();
+  })();
+</script>
+{% endblock %}

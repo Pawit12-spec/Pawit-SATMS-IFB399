@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from flask import Flask
 
 from influxdb_client_3 import InfluxDBClient3
-from .routes import start_escalation_worker, start_heartbeat_monitor
 
 # Load .env from the project root (one level above the app package)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -95,10 +94,7 @@ def create_app(test_config=None):
             app.logger.warning("DB init failed: %s", result["message"])
         else:
             _ensure_default_admin(app)
-            ensure_default_sites(app)
 
-        start_escalation_worker(app)
-        start_heartbeat_monitor(app)
     return app
 
 
@@ -136,44 +132,3 @@ def _ensure_default_admin(app):
             conn.close()
     except Exception as exc:
         app.logger.warning("Could not seed default admin: %s", exc)
-
-DEFAULT_SITES = [
-    ("Roma Street Central", "Substation Room", "Brisbane CBD", "Roma Street, Brisbane QLD 4000"),
-    ("Fortitude Valley Sub", "Substation Room", "Inner North", "Wickham Street, Fortitude Valley QLD 4006"),
-    ("South Brisbane Station", "Substation Room", "South Brisbane", "Grey Street, South Brisbane QLD 4101"),
-    ("West End Substation", "Substation Room", "West End", "Boundary Street, West End QLD 4101"),
-    ("Paddington Power Hub", "Substation Room", "Paddington", "Latrobe Terrace, Paddington QLD 4064"),
-]
-
-
-def ensure_default_sites(app):
-    """Seed the 5 default substation sites, skipping any that already exist by name."""
-    import psycopg2
-
-    try:
-        conn = psycopg2.connect(
-            host=app.config["PG_HOST"],
-            port=app.config["PG_PORT"],
-            user=app.config["PG_USER"],
-            password=app.config["PG_PASSWORD"],
-            dbname=app.config["PG_DATABASE"],
-        )
-        try:
-            inserted = 0
-            with conn.cursor() as cur:
-                for name, room_name, region, address in DEFAULT_SITES:
-                    cur.execute("SELECT 1 FROM site WHERE name = %s", (name,))
-                    if cur.fetchone() is None:
-                        cur.execute(
-                            "INSERT INTO site (name, room_name, region, address) "
-                            "VALUES (%s, %s, %s, %s)",
-                            (name, room_name, region, address),
-                        )
-                        inserted += 1
-            conn.commit()
-            if inserted:
-                app.logger.info("Seeded %d default sites.", inserted)
-        finally:
-            conn.close()
-    except Exception as exc:
-        app.logger.warning("Could not seed default sites: %s", exc)

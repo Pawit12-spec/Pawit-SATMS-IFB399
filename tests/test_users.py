@@ -19,7 +19,7 @@ def pg(monkeypatch):
     return SimpleNamespace(conn=conn, cur=cur)
 
 def test_users_page_returns_200(client):
-    resp = client.get("/assets?tab=users")
+    resp = client.get("/users")
     assert resp.status_code == 200
 
 
@@ -68,8 +68,7 @@ def test_update_role_redirects_on_success(client):
 def test_update_role_invalid_role_defaults_to_user(pg, client):
     resp = client.post("/users/bbbb-2222/role", data={"role": "superadmin"})
     assert resp.status_code == 302
-    # pg.cur.execute.assert_called_once()
-    assert pg.cur.execute.call_count == 2
+    pg.cur.execute.assert_called_once()
     assert pg.cur.execute.call_args[0][1][0] == "user"
     
 

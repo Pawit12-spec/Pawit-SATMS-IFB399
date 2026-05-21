@@ -17,9 +17,7 @@ joblib
 #image ml
 torch
 torchvision
-opencv-python
-
-#notifications
 twilio
 resend
+opencv-python
 

@@ -1,238 +1,220 @@
 <!DOCTYPE html>
 <html data-theme="light">
-
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta charset="utf-8" />
-  <script>
-    var USER_PREFERENCES = {{ session.get('preferences', {}) | tojson }};
-    var EVENTS_URL = "{{ url_for('main.events') }}";
-  </script>
-  <!-- Prevent flash of wrong theme on load -->
-  <script>
-    (function () {
-      var theme = USER_PREFERENCES.theme || 'light';
-      document.documentElement.setAttribute('data-theme', theme);
-      localStorage.setItem('theme', theme);
-
-      var cb = USER_PREFERENCES.colorblind || 'off';
-      document.documentElement.setAttribute('data-colorblind', cb);
-      localStorage.setItem('colorblind', cb);
-
-      try {
-        if (localStorage.getItem('sidebarCollapsed') === '1') {
-          document.documentElement.setAttribute('data-sidebar', 'collapsed');
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8" />
+    <!-- Prevent flash of wrong theme on load -->
+    <script>
+      (function () {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
         }
-      } catch (e) { /* noop */ }
-    })();
-  </script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='globals.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='preferences.css') }}" />
-  <script src="{{ url_for('static', filename='base.js') }}" defer></script>
-  <title>{% block title %}Substation Dashboard{% endblock %}</title>
-  {% block head %}{% endblock %}
-</head>
+      })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='globals.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}" />
+    <title>{% block title %}Substation Dashboard{% endblock %}</title>
+  </head>
 
-<body>
-  <header class="header-container">
-    <div class="home-bar">
-      <a href="{{ url_for('main.index') }}" class="header-brand" aria-label="Substation Dashboard home">
-        <img src="{{ url_for('static', filename='img/energy_qld_logo.png') }}" class="header-logo" alt="Energy Queensland" />
-        <span class="header-title">Substation Dashboard</span>
-      </a>
+  <body>
+    <header class="header-container">
+      <div class="home-bar">
+        <div class="header-title">Substation Dashboard</div>
 
-      <section class="home-bar-right-section">
-        <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode"
-          aria-label="Toggle light/dark mode">
-          <span class="toggle-knob" id="theme-icon">🌙</span>
-        </button>
+        <section class="home-bar-right-section">
+          <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <span class="toggle-knob" id="theme-icon">🌙</span>
+          </button>
 
-        <span id="latency-indicator" class="latency-indicator" title="Time since last reading">
-          Last reading: <span id="latency-text">--</span>
-        </span>
-
-        <div class="user-menu" id="user-menu">
-          <button class="user-menu-toggle" id="user-menu-toggle" aria-label="User menu">
-            <span class="user-menu-name">{{ session.get('full_name', '') }}</span>
-            <div class="ellipse">
-              {{ session.get('full_name', 'U')[:1] }}
+          <button class="button">
+            <div class="button-2">
+              Every 10 Minutes
+              <img class="refresh-page-option"
+                   src="{{ url_for('static', filename='img/refresh-page-option-1.png') }}" />
             </div>
           </button>
-          <div class="user-menu-dropdown">
-            <div class="user-menu-dropdown-header">
-              <div class="dropdown-name">{{ session.get('full_name', 'User') }}</div>
+
+          <span id="latency-indicator" class="latency-indicator" title="Time since last reading">
+            Last reading: <span id="latency-text">--</span>
+          </span>
+
+          <div class="user-menu" id="user-menu">
+            <button class="user-menu-toggle" id="user-menu-toggle" aria-label="User menu">
+              <span class="user-menu-name">{{ session.get('full_name', '') }}</span>
+              <div class="ellipse">
+                {{ session.get('full_name', 'U')[:1] }}
+              </div>
+            </button>
+            <div class="user-menu-dropdown">
+              <div class="user-menu-dropdown-header">
+                <div class="dropdown-name">{{ session.get('full_name', 'User') }}</div>
+              </div>
+              {% if session.get('role') == 'asset_owner' %}
+              <a href="{{ url_for('main.users') }}">Manage Users</a>
+              {% endif %}
+              <a href="{{ url_for('main.logout') }}">Sign Out</a>
             </div>
-            <button class="user-menu-dropdown-btn" id="profile-settings-btn">Profile Settings</button>
+          </div>
+        </section>
+      </div>
+    </header>
+
+    <div id="stale-banner" class="stale-banner" style="display: none;">
+      Data delay detected! Last reading <span id="stale-time"></span> ago
+    </div>
+
+    <div class="page-layout">
+      <section class="side-bar-container">
+        <div class="side-bar">
+          <nav class="side-bar-menu">
+            <a href="{{ url_for('main.index') }}"
+               class="menu-link {% if request.endpoint == 'main.index' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/home-1-36x36.svg') }}" class="menu-icon"/>
+              <span>OVERVIEW</span>
+            </a>
+
+            <a href="{{ url_for('main.temperature') }}"
+               class="menu-link {% if request.endpoint == 'main.temperature' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/thermometer-1-36x36.svg') }}" class="menu-icon"/>
+              <span>TEMPERATURE</span>
+            </a>
+
+            <a href="{{ url_for('main.humidity') }}"
+               class="menu-link {% if request.endpoint == 'main.humidity' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/humidity-1-36x36.svg') }}" class="menu-icon"/>
+              <span>HUMIDITY</span>
+            </a>
+
+            <a href="{{ url_for('main.co2') }}"
+               class="menu-link {% if request.endpoint == 'main.co2' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/carbon-dioxide-1-36x36.svg') }}" class="menu-icon"/>
+              <span>CO2</span>
+            </a>
+
+            <a href="{{ url_for('main.air_quality') }}"
+               class="menu-link {% if request.endpoint == 'main.air_quality' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/wind-1-36x36.svg') }}" class="menu-icon"/>
+              <span>AIR QUALITY</span>
+            </a>
+
+            <a href="{{ url_for('main.thermal') }}"
+               class="menu-link {% if request.endpoint == 'main.thermal' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/thermal-imager-1-36x36.svg') }}" class="menu-icon"/>
+              <span>THERMAL IMAGE</span>
+            </a>
+
             {% if session.get('role') == 'asset_owner' %}
-            <a href="{{ url_for('main.audit_log') }}">Audit Log</a>
+            <a href="{{ url_for('main.users') }}"
+               class="menu-link {% if request.endpoint == 'main.users' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/user.svg') }}" class="menu-icon" style="width:36px;height:36px;"/>
+              <span>MANAGE USERS</span>
+            </a>
+            <a href="{{ url_for('main.assets') }}"
+               class="menu-link {% if request.endpoint == 'main.assets' %}active{% endif %}">
+              <img src="{{ url_for('static', filename='img/settings-symbol-26x26.svg') }}" class="menu-icon" style="width:36px;height:36px;"/>
+              <span>ASSETS</span>
+            </a>
             {% endif %}
-            <a href="{{ url_for('main.logout') }}">Sign Out</a>
+          </nav>
+
+          <div class="EQL-LOGO">
+            <img src="{{ url_for('static', filename='img/energy-queensland-logo-208x20.svg') }}"/>
+          </div>
+
+          <div class="side-bar-bottom-grid">
+            <button class="side-bar-grid-button">
+              <img src="{{ url_for('static', filename='img/settings-symbol-26x26.svg') }}"/>
+            </button>
+            <button class="side-bar-grid-button">
+              <img src="{{ url_for('static', filename='img/search-interface-symbol-26x26.svg') }}"/>
+            </button>
           </div>
         </div>
       </section>
+
+      <main class="{% block main_class %}substation-data-overview-container{% endblock %}">
+        {% block content %}{% endblock %}
+      </main>
     </div>
-  </header>
 
-  <div id="stale-banner" class="stale-banner" style="display: none;">
-    Data delay detected! Last reading <span id="stale-time"></span> ago
-  </div>
+    {% block scripts %}{% endblock %}
 
-  <div id="profile-settings-modal" class="pref-modal-backdrop" style="display:none;" aria-modal="true" role="dialog"
-    aria-labelledby="pref-modal-title">
-    <div class="pref-modal">
-      <div class="pref-modal-header">
-        <div class="pref-modal-heading">
-          <div class="pref-modal-avatar" aria-hidden="true">
-            {{ session.get('full_name', 'U')[:1] | upper }}
-          </div>
-          <div class="pref-modal-heading-text">
-            <span class="pref-modal-title" id="pref-modal-title">Profile Settings</span>
-            <span class="pref-modal-subtitle">{{ session.get('full_name', 'User') }}</span>
-          </div>
-        </div>
-        <button class="users-edit-close pref-modal-close" id="pref-modal-close" aria-label="Close">&times;</button>
-      </div>
-      <div class="pref-modal-body">
+    <script>
+      (function () {
+        var root = document.documentElement 
+        var btn = document.getElementById('theme-icon');
 
-        <div class="pref-section">
-          <div class="pref-section-header">
-            <span class="pref-section-title">Profile</span>
-            <span class="pref-section-sub">How you appear in the app</span>
-          </div>
-          <div class="pref-row">
-            <div class="pref-row-text">
-              <label class="pref-label" for="pref-name">Display Name</label>
-              <span class="pref-row-hint">Shown in the header and on alerts</span>
-            </div>
-            <input class="pref-control" type="text" id="pref-name" maxlength="100" autocomplete="off" />
-          </div>
-        </div>
+        function applyTheme(theme) {
+          root.setAttribute('data-theme', theme);
+          btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+          localStorage.setItem('theme', theme);
+        }
 
-        <div class="pref-section">
-          <div class="pref-section-header">
-            <span class="pref-section-title">Appearance</span>
-            <span class="pref-section-sub">Customise the dashboard look</span>
-          </div>
-          <div class="pref-row">
-            <div class="pref-row-text">
-              <label class="pref-label" for="pref-theme">Theme</label>
-              <span class="pref-row-hint">Switch between light and dark mode</span>
-            </div>
-            <select class="pref-control" id="pref-theme">
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </div>
-          <div class="pref-row">
-            <div class="pref-row-text">
-              <label class="pref-label" for="pref-colorblind">Colorblind Mode</label>
-              <span class="pref-row-hint">Higher-contrast palette for charts</span>
-            </div>
-            <select class="pref-control" id="pref-colorblind">
-              <option value="off">Off</option>
-              <option value="on">On</option>
-            </select>
-          </div>
-        </div>
+        // Determine initial theme, depending what was chosen beforehand. Otherwise fallback - default light.
+        applyTheme(root.getAttribute('data-theme') || 'light');
+        
+        document.getElementById('theme-toggle').addEventListener('click', function () {
+          applyTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+        });
+      })();
+    </script>
 
-        <div class="pref-section">
-          <div class="pref-section-header">
-            <span class="pref-section-title">Behaviour</span>
-            <span class="pref-section-sub">Defaults applied when you sign in</span>
-          </div>
-          <div class="pref-row">
-            <div class="pref-row-text">
-              <label class="pref-label" for="pref-default-page">Default Page</label>
-              <span class="pref-row-hint">Where to land after signing in</span>
-            </div>
-            <select class="pref-control" id="pref-default-page">
-              <option value="index">Substations</option>
-              <option value="temperature">Temperature</option>
-              <option value="humidity">Humidity</option>
-              <option value="co2">CO2</option>
-              <option value="air_quality">Air Quality</option>
-              <option value="thermal">Thermal Image</option>
-            </select>
-          </div>
-          <div class="pref-row">
-            <div class="pref-row-text">
-              <label class="pref-label" for="pref-delay">Data Detection Delay</label>
-              <span class="pref-row-hint">When to flag data as stale</span>
-            </div>
-            <select class="pref-control" id="pref-delay">
-              <option value="60">1 minute</option>
-              <option value="120">2 minutes</option>
-              <option value="300">5 minutes</option>
-              <option value="600">10 minutes</option>
-            </select>
-          </div>
-        </div>
+    <script>
+      (function () {
+        var menu = document.getElementById('user-menu');
+        var toggle = document.getElementById('user-menu-toggle');
+        if (toggle) {
+          toggle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            menu.classList.toggle('open');
+          });
+          document.addEventListener('click', function () {
+            menu.classList.remove('open');
+          });
+        }
+      })();
+    </script>
 
-      </div>
-      <div class="pref-modal-footer">
-        <span class="pref-save-status" id="pref-save-status"></span>
-        <button class="pref-save-btn" id="pref-save-btn">Save Changes</button>
-      </div>
-    </div>
-  </div>
+    <script>
+      (function () {
+        var lastReading = null;
+        var es = new EventSource("{{ url_for('main.events') }}");
 
-  <div class="page-layout">
-    <section class="side-bar-container">
-      <div class="side-bar">
-        <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle"
-                aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
-          <span class="sidebar-collapse-icon" aria-hidden="true">‹</span>
-        </button>
-        <nav class="side-bar-menu">
-          <a href="{{ url_for('main.index') }}"
-            class="menu-link {% if request.endpoint == 'main.index' %}active{% endif %}"
-            title="Substations">
-            <img src="{{ url_for('static', filename='img/location.svg') }}" class="menu-icon" width="36" height="36" />
-            <span>SUBSTATIONS</span>
-          </a>
+        es.addEventListener("reading", function (evt) {
+          var r = JSON.parse(evt.data);
+          lastReading = new Date(r.timestamp);
+          if (window.onReadingEvent) window.onReadingEvent(r);
+          update();
+        });
 
-          {% block sidebar_site_nav %}{% endblock %}
+        function update() {
+          if (!lastReading) return;
+          var secs = Math.floor((Date.now() - lastReading.getTime()) / 1000);
+          var text;
+          if (secs < 60) text = secs + "s ago";
+          else if (secs < 3600) text = Math.floor(secs / 60) + "m " + (secs % 60) + "s ago";
+          else text = Math.floor(secs / 3600) + "h " + Math.floor((secs % 3600) / 60) + "m ago";
 
-          {% if site_info %}
-          <a href="{{ url_for('main.thermal', site_id=site_info.site_id) }}"
-            class="menu-link {% if request.endpoint == 'main.thermal' %}active{% endif %}"
-            title="Thermal Image">
-            <img src="{{ url_for('static', filename='img/thermal-imager-1-36x36.svg') }}" class="menu-icon" />
-            <span>THERMAL IMAGE</span>
-          </a>
-          {% endif %}
-        </nav>
+          var el = document.getElementById("latency-text");
+          if (el) el.textContent = text;
 
-        {% if session.get('role') == 'asset_owner' %}
-        <nav class="side-bar-bottom-menu" aria-label="Settings">
-          <a href="{{ url_for('main.assets') }}"
-            class="menu-link {% if request.endpoint == 'main.assets' %}active{% endif %}"
-            title="Settings">
-            <img src="{{ url_for('static', filename='img/settings-symbol-26x26.svg') }}" class="menu-icon"
-              style="width:36px;height:36px;" />
-            <span>SETTINGS</span>
-          </a>
-        </nav>
-        {% endif %}
+          var banner = document.getElementById("stale-banner");
+          var indicator = document.getElementById("latency-indicator");
+          if (secs > 120) {
+            if (banner) banner.style.display = "flex";
+            var st = document.getElementById("stale-time");
+            if (st) st.textContent = text;
+            if (indicator) indicator.classList.add("stale");
+          } else {
+            if (banner) banner.style.display = "none";
+            if (indicator) indicator.classList.remove("stale");
+          }
+        }
 
-        <div class="EQL-LOGO">
-          <img src="{{ url_for('static', filename='img/energy-queensland-logo-208x20.svg') }}" alt="Energy Queensland" />
-          <div class="sidebar-footer-text">
-            &copy; 2026 Energy Queensland<br />
-            Substation Dashboard &middot; v1.0
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <main class="{% block main_class %}substation-data-overview-container{% endblock %}">
-      {% block content %}{% endblock %}
-    </main>
-  </div>
-
-  {% block scripts %}{% endblock %}
-</body>
-
+        setInterval(update, 1000);
+      })();
+    </script>
+  </body>
 </html>

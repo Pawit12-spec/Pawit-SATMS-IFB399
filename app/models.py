@@ -48,10 +48,7 @@ CREATE TABLE IF NOT EXISTS site (
   region     TEXT,
   address    TEXT,
   latitude   NUMERIC(9,6),
-  longitude  NUMERIC(9,6),
-  escalation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-  escalation_timeout_minutes INT NOT NULL DEFAULT 30,
-  secondary_contact_user_id UUID
+  longitude  NUMERIC(9,6)
 );
 
 CREATE TABLE IF NOT EXISTS device (
@@ -173,8 +170,7 @@ CREATE TABLE IF NOT EXISTS app_user (
   phone_e164 TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
-  is_active  BOOLEAN NOT NULL DEFAULT TRUE,
-  preferences JSONB NOT NULL DEFAULT '{}'
+  is_active  BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS notify_target (
@@ -205,41 +201,6 @@ CREATE TABLE IF NOT EXISTS nlq_query_log (
   result_rows  INT
 );
 
-/* 
-AUDIT LOG
-*/
-CREATE TABLE IF NOT EXISTS audit_log (
-  action_id           BIGSERIAL PRIMARY KEY,
-  action_user_id      UUID REFERENCES app_user(user_id) ON DELETE SET NULL,
-  action_user_name    TEXT,
-  action_taken        TEXT NOT NULL,
-  action_time         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  old_setting         JSONB,
-  new_setting         JSONB
-  
-);
-
-CREATE OR REPLACE FUNCTION no_update_or_delete() 
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-RAISE EXCEPTION 'Updates and deletes are not permitted';
-END; 
-$$;
-
-DROP TRIGGER IF EXISTS trg_tamperproof_audit_log ON audit_log;
-
-
-CREATE TRIGGER trg_tamperproof_audit_log
-BEFORE UPDATE OR DELETE ON audit_log
-FOR EACH ROW EXECUTE FUNCTION no_update_or_delete();
-
-/* 
-END AUDIT LOG
-*/
-
-
 CREATE OR REPLACE VIEW v_measurement_retention AS
 SELECT * FROM measurement WHERE ts < now() - INTERVAL '90 days';
 
@@ -253,28 +214,11 @@ CREATE TABLE IF NOT EXISTS user_assets (
   PRIMARY KEY (site_id, user_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_user_assets_user
-  ON user_assets (user_id);
+CREATE INDEX IF NOT EXISTS idx_site_user_user
+  ON site_user (user_id);
 
-CREATE INDEX IF NOT EXISTS idx_user_assets_site
-  ON user_assets (site_id);
-
-CREATE TABLE IF NOT EXISTS anomaly_review (
-  review_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  site_id          UUID NOT NULL REFERENCES site(site_id) ON DELETE CASCADE,
-  reviewed_by      TEXT NOT NULL,
-  user_id          UUID REFERENCES app_user(user_id) ON DELETE SET NULL,
-  reviewed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  status_at_review TEXT NOT NULL,
-  comment          TEXT,
-  timeout_minutes  INT NOT NULL DEFAULT 0,
-  timeout_until    TIMESTAMPTZ,
-  severity TEXT,
-  escalated_at TIMESTAMPTZ
-  );
-
-CREATE INDEX IF NOT EXISTS idx_anomaly_review_site
-  ON anomaly_review (site_id, reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_site_user_site
+  ON site_user (site_id);
 """
 
 INDEXES_SQL_TEMPLATE = r"""
@@ -459,23 +403,6 @@ def init_database(host="localhost", port=5432, user="postgres", password="postgr
         try:
             print("Applying schema ...")
             run_sql(conn, SCHEMA_SQL)
-            run_sql(conn, "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'")
-            run_sql(conn, "ALTER TABLE site ADD COLUMN IF NOT EXISTS escalation_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-            run_sql(conn, "ALTER TABLE site ADD COLUMN IF NOT EXISTS escalation_timeout_minutes INT NOT NULL DEFAULT 30")
-            run_sql(conn, "ALTER TABLE site ADD COLUMN IF NOT EXISTS secondary_contact_user_id UUID")
-            run_sql(conn, """
-                DO $$ BEGIN
-                  IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'site_secondary_contact_fk'
-                  ) THEN
-                    ALTER TABLE site
-                      ADD CONSTRAINT site_secondary_contact_fk
-                      FOREIGN KEY (secondary_contact_user_id)
-                      REFERENCES app_user(user_id) ON DELETE SET NULL;
-                  END IF;
-                END $$;
-            """)
-            run_sql(conn, "ALTER TABLE anomaly_review ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ")
             print("Ensuring partitions ...")
             ensure_partitions(conn, months_ahead=partitions_ahead, months_back=partitions_back)
             print("Done.")

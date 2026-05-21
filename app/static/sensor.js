@@ -6,7 +6,6 @@ document.addEventListener('DOMContentLoaded', function () {
     var color     = page.dataset.color;
     var units     = page.dataset.units;
     var baseTitle = page.dataset.chartTitle || 'Sensor';
-    var siteId    = page.dataset.siteId || '';
 
     var currentPeriod = 'day';
     var periodSelect  = document.getElementById('periodSelect');
@@ -147,7 +146,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         showLoading();
 
-        fetch('/api/readings?period=' + encodeURIComponent(period) + '&field=' + encodeURIComponent(field) + (siteId ? '&site_id=' + encodeURIComponent(siteId) : ''))
+        fetch('/api/readings?period=' + encodeURIComponent(period) + '&field=' + encodeURIComponent(field))
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 var rows = data.readings || [];
@@ -197,8 +196,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* SSE handler: updates current values */
     window.onReadingEvent = function (r) {
-        if (siteId && r.site_id && r.site_id !== siteId) return;
-
         var val = Number(r[field]);
         var formatted = formatValue(val);
 
@@ -231,6 +228,4 @@ document.addEventListener('DOMContentLoaded', function () {
             tableBody.removeChild(tableBody.lastChild);
         }
     };
-
-    initCsvExport('/api/export/sensors?field=' + encodeURIComponent(field), 'sensor_readings_' + field + '.csv');
 });
