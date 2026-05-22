@@ -894,7 +894,7 @@ def upload_image():
                         print(f"[LOW] {name} [{device_key}]: 1st overheating reading. Temp: {reading['temp']}°C")
                     elif count == 2:
                         print(f"[MEDIUM] {name} [{device_key}]: 2nd consecutive overheating. Temp: {reading['temp']}°C")
-                    elif count >= 3:
+                    elif count == 3:
                         try:
                             a = alert.HighPriorityAlert(
                                 f"{name} overheating — {count} consecutive readings above {reading['threshold']}°C.\n"
