@@ -39,6 +39,15 @@
       Sites
       <span class="manage-tab-count">{{ sites | length }}</span>
     </button>
+    <button type="button"
+            class="manage-tab {% if active_tab|default('users') == 'zones' %}is-active{% endif %}"
+            role="tab"
+            data-tab-target="zones"
+            aria-selected="{{ 'true' if active_tab|default('users') == 'zones' else 'false' }}"
+            aria-controls="manage-tab-zones">
+      Zones
+      <span class="manage-tab-count">{{ zones | length }}</span>
+    </button>
   </div>
 
   {# ---------- USERS TAB ---------- #}
@@ -360,6 +369,119 @@
     </div>
   </section>
 
+  {# ---------- ZONES TAB ---------- #}
+  <section id="manage-tab-zones"
+           class="manage-tab-panel {% if active_tab|default('users') == 'zones' %}is-active{% endif %}"
+           role="tabpanel"
+           aria-labelledby="manage-tab-zones">
+    <div id="zones-page-root" class="users-layout">
+      <section class="card users-form-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Add Equipment Zone</span>
+          </div>
+        </div>
+        <div class="card-divider"></div>
+        <form method="POST" action="{{ url_for('main.create_zone') }}" class="users-form assets-form">
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Camera</span>
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="zone-camera-id">Camera ID <span class="assets-required">*</span></label>
+            <input type="text" id="zone-camera-id" name="camera_id"
+                   placeholder="e.g. Substation_Alpha_Cam1" required />
+          </div>
+          <div class="login-field assets-field-full">
+            <label for="zone-name">Zone Name <span class="assets-required">*</span></label>
+            <input type="text" id="zone-name" name="name"
+                   placeholder="e.g. Battery Bank" required />
+          </div>
+          <div class="login-field">
+            <label for="zone-sort-order">Sort Order</label>
+            <input type="number" id="zone-sort-order" name="sort_order" min="0" value="0" required />
+          </div>
+          <div class="assets-form-section">
+            <span class="assets-form-section-title">Coordinates (24 × 32 grid)</span>
+          </div>
+          <div class="login-field">
+            <label for="zone-start-y">Start Row</label>
+            <input type="number" id="zone-start-y" name="start_y" min="0" max="23" required />
+          </div>
+          <div class="login-field">
+            <label for="zone-end-y">End Row</label>
+            <input type="number" id="zone-end-y" name="end_y" min="1" max="24" required />
+          </div>
+          <div class="login-field">
+            <label for="zone-start-x">Start Col</label>
+            <input type="number" id="zone-start-x" name="start_x" min="0" max="31" required />
+          </div>
+          <div class="login-field">
+            <label for="zone-end-x">End Col</label>
+            <input type="number" id="zone-end-x" name="end_x" min="1" max="32" required />
+          </div>
+          <button type="submit" class="login-btn assets-submit-btn">Add Zone</button>
+        </form>
+      </section>
+
+      <section class="card users-table-card">
+        <div class="card-top">
+          <div class="card-title">
+            <span class="users-card-heading">Equipment Zones</span>
+          </div>
+          <span class="users-count">{{ zones | length }} zone{{ 's' if zones | length != 1 }}</span>
+        </div>
+        <div class="card-divider"></div>
+        <div class="users-table-scroll">
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Camera ID</th>
+                <th>Zone Name</th>
+                <th>Order</th>
+                <th>Rows</th>
+                <th>Cols</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for z in zones %}
+              <tr>
+                <td>{{ z.camera_id }}</td>
+                <td>{{ z.name }}</td>
+                <td>{{ z.sort_order }}</td>
+                <td>{{ z.start_y }}–{{ z.end_y }}</td>
+                <td>{{ z.start_x }}–{{ z.end_x }}</td>
+                <td class="users-actions-cell">
+                  <div class="users-row-actions">
+                    <button type="button" class="user-edit-btn zone-edit-btn"
+                            data-zone-id="{{ z.zone_id }}"
+                            data-camera-id="{{ z.camera_id }}"
+                            data-name="{{ z.name }}"
+                            data-sort-order="{{ z.sort_order }}"
+                            data-start-y="{{ z.start_y }}"
+                            data-end-y="{{ z.end_y }}"
+                            data-start-x="{{ z.start_x }}"
+                            data-end-x="{{ z.end_x }}">
+                      Edit
+                    </button>
+                    <form method="POST" action="{{ url_for('main.delete_zone', zone_id=z.zone_id) }}"
+                          onsubmit="return confirm('Delete zone {{ z.name }} ({{ z.camera_id }})?')">
+                      <button type="submit" class="users-delete-btn">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% if not zones %}
+              <tr><td colspan="6" class="users-empty">No zones configured</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
   {# ---------- USER EDIT MODAL ---------- #}
   <div class="users-edit-backdrop" id="users-edit-backdrop" aria-hidden="true"></div>
   <div class="users-edit-overlay" id="users-edit-overlay" aria-hidden="true">
@@ -433,6 +555,52 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  {# ---------- ZONE EDIT MODAL ---------- #}
+  <div class="users-edit-backdrop" id="zones-edit-backdrop" aria-hidden="true"></div>
+  <div class="users-edit-overlay" id="zones-edit-overlay" aria-hidden="true">
+    <div class="assets-edit-modal" role="dialog" aria-modal="true" aria-labelledby="zones-edit-title">
+      <button type="button" class="users-edit-close" id="zones-edit-close" aria-label="Close">&times;</button>
+      <h3 id="zones-edit-title">Edit Zone</h3>
+      <form id="zone-edit-form" method="POST" class="users-edit-form assets-form">
+        <div class="login-field assets-field-full">
+          <label for="ze-camera-id">Camera ID <span class="assets-required">*</span></label>
+          <input type="text" name="camera_id" id="ze-camera-id" required />
+        </div>
+        <div class="login-field assets-field-full">
+          <label for="ze-name">Zone Name <span class="assets-required">*</span></label>
+          <input type="text" name="name" id="ze-name" required />
+        </div>
+        <div class="login-field">
+          <label for="ze-sort-order">Sort Order</label>
+          <input type="number" name="sort_order" id="ze-sort-order" min="0" required />
+        </div>
+        <div class="assets-form-section">
+          <span class="assets-form-section-title">Coordinates (24 × 32 grid)</span>
+        </div>
+        <div class="login-field">
+          <label for="ze-start-y">Start Row</label>
+          <input type="number" name="start_y" id="ze-start-y" min="0" max="23" required />
+        </div>
+        <div class="login-field">
+          <label for="ze-end-y">End Row</label>
+          <input type="number" name="end_y" id="ze-end-y" min="1" max="24" required />
+        </div>
+        <div class="login-field">
+          <label for="ze-start-x">Start Col</label>
+          <input type="number" name="start_x" id="ze-start-x" min="0" max="31" required />
+        </div>
+        <div class="login-field">
+          <label for="ze-end-x">End Col</label>
+          <input type="number" name="end_x" id="ze-end-x" min="1" max="32" required />
+        </div>
+        <div class="users-edit-actions assets-field-full">
+          <button type="button" class="users-edit-cancel-btn" id="zones-edit-cancel">Cancel</button>
+          <button type="submit" class="login-btn">Save Changes</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -598,7 +766,7 @@
     });
     var qs = new URLSearchParams(window.location.search);
     var initial = qs.get('tab') || root.dataset.activeTab || 'users';
-    if (initial !== 'users' && initial !== 'sites') initial = 'users';
+    if (initial !== 'users' && initial !== 'sites' && initial !== 'zones') initial = 'users';
     activate(initial);
   })();
 
@@ -888,6 +1056,45 @@
     overlay.addEventListener('click', function(e) { if (e.target === overlay) closeEditModal(); });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && pageRoot.classList.contains('assets-edit-open')) closeEditModal();
+    });
+  })();
+
+  // ---------- Zone edit modal ----------
+  (function() {
+    var pageRoot = document.getElementById('manage-page-root');
+    var overlay  = document.getElementById('zones-edit-overlay');
+    var backdrop = document.getElementById('zones-edit-backdrop');
+    var form     = document.getElementById('zone-edit-form');
+    if (!pageRoot || !overlay || !form) return;
+
+    function open(btn) {
+      form.action = '/zones/' + btn.dataset.zoneId + '/edit';
+      document.getElementById('ze-camera-id').value  = btn.dataset.cameraId  || '';
+      document.getElementById('ze-name').value       = btn.dataset.name       || '';
+      document.getElementById('ze-sort-order').value = btn.dataset.sortOrder  || '0';
+      document.getElementById('ze-start-y').value    = btn.dataset.startY     || '';
+      document.getElementById('ze-end-y').value      = btn.dataset.endY       || '';
+      document.getElementById('ze-start-x').value    = btn.dataset.startX     || '';
+      document.getElementById('ze-end-x').value      = btn.dataset.endX       || '';
+      overlay.setAttribute('aria-hidden', 'false');
+      pageRoot.classList.add('zones-edit-open');
+    }
+    function close() {
+      overlay.setAttribute('aria-hidden', 'true');
+      pageRoot.classList.remove('zones-edit-open');
+    }
+
+    document.querySelectorAll('.zone-edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { open(btn); });
+    });
+    document.getElementById('zones-edit-close').addEventListener('click', close);
+    document.getElementById('zones-edit-cancel').addEventListener('click', function(e) {
+      e.preventDefault(); close();
+    });
+    if (backdrop) backdrop.addEventListener('click', close);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && pageRoot.classList.contains('zones-edit-open')) close();
     });
   })();
 </script>
