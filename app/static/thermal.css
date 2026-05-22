@@ -13,11 +13,14 @@
 
 .thermal-image-card {
     grid-row: span 2;
+    min-height: 480px;
 }
 
 .thermal-img {
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
 }
 
 .thermal-info-card {

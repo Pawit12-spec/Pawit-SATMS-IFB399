@@ -9,6 +9,16 @@ import numpy as np
 
 
 class HotspotCAM(nn.Module):
+    """4-conv, 2-pool, GAP + Linear CNN for thermal hotspot classification.
+
+    GAP (not Flatten) preserves the spatial link between feature maps and classifier
+    weights, enabling generate_cam(). Two max-pools reduce a 24×32 input to a 6×8
+    feature map — each cell covers ~4×4 px, which is too coarse to pinpoint a
+    specific component. localize_and_draw() uses HSV thresholding instead.
+    CAM is the documented upgrade path when the sensor is replaced with a
+    higher-resolution unit (see model_archives/localize_cam.py).
+    """
+
     def __init__(self, in_channels=3, num_classes=2):
         super().__init__()
         self.features = nn.Sequential(
@@ -41,6 +51,11 @@ class HotspotCAM(nn.Module):
         return self.classifier(self.dropout(x))
 
     def generate_cam(self, image_tensor, class_idx):
+        """Return a normalised 6×8 class activation map for class_idx.
+
+        At 24×32 input resolution each cell represents a 4×4 px region —
+        useful for qualitative hotspot attribution only, not precise localisation.
+        """
         self.eval()
         with torch.no_grad():
             feat_maps = self.features(image_tensor)  # [1, 128, 6, 8]
@@ -81,6 +96,11 @@ transform = transforms.Compose([
 
 
 def analyse_image(path):
+    """Classify a thermal image as hotspot or normal.
+
+    Returns {is_anomaly, label, confidence}. confidence is always the probability of
+    the predicted label (hotspot prob when is_anomaly=True, normal prob otherwise).
+    """
     img_tensor = transform(Image.open(path).convert("RGB")).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -96,6 +116,11 @@ def analyse_image(path):
 
 
 def thermal_analytics(result):
+    """Map a classification result to human-readable inspection guidance.
+
+    Three confidence tiers: ≥85 % immediate inspection, 70–84 % verify, <70 % monitor.
+    Returns empty analysis list when is_anomaly is False.
+    """
     analysis = []
     if not result.get("is_anomaly"):
         return {"analysis": analysis}
@@ -112,31 +137,24 @@ def thermal_analytics(result):
     return {"analysis": analysis}
 
 
-def localize_and_draw(image_path, camera_id="Substation_Alpha_Cam1", output_path=None):
+def localize_and_draw(image_path, camera_id="Substation_Alpha_Cam1", output_path=None, zones=None):
     """
     Localise the hotspot using HSV colour thresholding and annotate the image.
 
-    Classification is already done by analyse_image() — this function only handles
-    WHERE the hotspot is. It reads temperature directly from the false-colour image:
-    orange/yellow pixels are warm, blue pixels are cold.
-
+    Classification is done by analyse_image() — this function only handles WHERE.
     Red wraps in HSV (hue 0-8 AND 165-180), so three ranges are checked to avoid
     missing very-hot blobs that appear red on the colormap.
 
-    Equipment zones from substation_configs are masked out before detection so
-    normal equipment heat does not trigger false circles.
+    zones=None falls back to substation_zones.json; pass a DB-fetched list to use
+    live config. Equipment zone pixels are zeroed from the mask so normal equipment
+    heat does not produce false circles.
 
-    Args:
-        image_path:  path to the thermal PNG to annotate
-        camera_id:   camera identifier, used to look up zone coordinates
-        output_path: where to save the annotated image; overwrites in place if None
-
-    Returns:
-        (save_path, detections) where detections is a list of (cx, cy, radius) tuples.
-        Empty list means CNN flagged a hotspot but no warm pixels were found outside
-        the equipment zones (possible very faint or borderline case).
+    Returns (save_path, detections); detections is a list of (cx, cy, radius) tuples.
+    Empty list means CNN flagged a hotspot but no warm pixels found outside zones.
     """
-    from .substation_configs import SUBSTATION_ZONES
+    if zones is None:
+        from .substation_configs import SUBSTATION_ZONES
+        zones = SUBSTATION_ZONES.get(camera_id, [])
 
     CAM_H, CAM_W = 24, 32
 
@@ -144,7 +162,6 @@ def localize_and_draw(image_path, camera_id="Substation_Alpha_Cam1", output_path
     img_h, img_w = img_cv.shape[:2]
     scale_x      = img_w / CAM_W
     scale_y      = img_h / CAM_H
-    zones        = SUBSTATION_ZONES.get(camera_id, [])
 
     # green boxes for known safe equipment zones
     for zone in zones:
