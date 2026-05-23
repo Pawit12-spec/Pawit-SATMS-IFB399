@@ -865,8 +865,11 @@ def upload_image():
             current_app.logger.warning("Hotspot localisation failed: %s", e)
         try:
             a = alert.HighPriorityAlert(
-                f"Irregular hotspot detected - camera {camera_id}. "
-                f"Please ensure equipment is behaving correctly. Timestamp: {now_dt.isoformat()}",
+                f"HOTSPOT ALERT\n"
+                f"Camera: {camera_id}\n"
+                f"Irregular hotspot detected.\n"
+                f"Check equipment immediately.\n"
+                f"Time: {now_dt.isoformat()}",
                 camera_id, now_dt.isoformat(),
                 recipients_email=recipients_email,
                 recipients_phone=recipients_phone,
@@ -897,8 +900,11 @@ def upload_image():
                     elif count == 3:
                         try:
                             a = alert.HighPriorityAlert(
-                                f"{name} overheating - {count} consecutive readings above {reading['threshold']}C. "
-                                f"Last reading: {reading['temp']}C. Immediate attention required! Timestamp: {now_dt.isoformat()}",
+                                f"EQUIPMENT ALERT\n"
+                                f"Zone: {name}\n"
+                                f"{count} consecutive readings above {reading['threshold']}C\n"
+                                f"Last reading: {reading['temp']}C\n"
+                                f"Time: {now_dt.isoformat()}",
                                 f"{name} [{camera_id}]", now_dt.isoformat(),
                                 recipients_email=recipients_email,
                                 recipients_phone=recipients_phone,
@@ -2019,7 +2025,7 @@ def monitor_offline_devices(current_time):
                         state["last_daily"] = period
 
             if should_alert:
-                message = f"CRITICAL: {device_id} IS OFFLINE. TOTAL DOWNTIME: {time_str}."
+                message = f"DEVICE OFFLINE\nDevice: {device_id}\nTotal downtime: {time_str}"
                 print(message)
                 try:
                     offline_alert = alert.HighPriorityAlert(
@@ -2034,7 +2040,7 @@ def monitor_offline_devices(current_time):
         else:
             # 4. Device is ONLINE (duration < 20s)
             if state["is_offline"]:
-                message = f"RECOVERY: {device_id} IS BACK ONLINE! Connection restored."
+                message = f"DEVICE RECOVERED\nDevice: {device_id}\nConnection restored."
                 print(message)
                 try:
                     recovery_alert = alert.HighPriorityAlert(
