@@ -865,8 +865,8 @@ def upload_image():
             current_app.logger.warning("Hotspot localisation failed: %s", e)
         try:
             a = alert.HighPriorityAlert(
-                f"Irregular hotspot detected — camera {camera_id}. "
-                f"Please ensure equipment is behaving correctly.\nTimestamp: {now_dt.isoformat()}",
+                f"Irregular hotspot detected - camera {camera_id}. "
+                f"Please ensure equipment is behaving correctly. Timestamp: {now_dt.isoformat()}",
                 camera_id, now_dt.isoformat(),
                 recipients_email=recipients_email,
                 recipients_phone=recipients_phone,
@@ -897,8 +897,8 @@ def upload_image():
                     elif count == 3:
                         try:
                             a = alert.HighPriorityAlert(
-                                f"{name} overheating — {count} consecutive readings above {reading['threshold']}°C.\n"
-                                f"Last reading: {reading['temp']}°C. Immediate attention required!\nTimestamp: {now_dt.isoformat()}",
+                                f"{name} overheating - {count} consecutive readings above {reading['threshold']}C. "
+                                f"Last reading: {reading['temp']}C. Immediate attention required! Timestamp: {now_dt.isoformat()}",
                                 f"{name} [{camera_id}]", now_dt.isoformat(),
                                 recipients_email=recipients_email,
                                 recipients_phone=recipients_phone,

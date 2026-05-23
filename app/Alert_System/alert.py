@@ -46,7 +46,7 @@ class HighPriorityAlert:
         from_phone = os.getenv("TWILIO_FROM_PHONE")
         print(f"SMS sent to +{recipient} with message: {message_body}")
         client.messages.create(
-            body=f"{message_body}\nDispatched to: +{recipient}",
+            body=f"{message_body}\nDispatched to: emergency contact",
             from_=from_phone,
             to=f"+{recipient}",
         )
