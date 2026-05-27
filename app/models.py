@@ -275,6 +275,19 @@ CREATE TABLE IF NOT EXISTS anomaly_review (
 
 CREATE INDEX IF NOT EXISTS idx_anomaly_review_site
   ON anomaly_review (site_id, reviewed_at DESC);
+
+CREATE TABLE IF NOT EXISTS camera_zone (
+  zone_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  camera_id  TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  start_y    INTEGER NOT NULL CHECK (start_y >= 0),
+  end_y      INTEGER NOT NULL CHECK (end_y > start_y),
+  start_x    INTEGER NOT NULL CHECK (start_x >= 0),
+  end_x      INTEGER NOT NULL CHECK (end_x > start_x),
+  UNIQUE (camera_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_camera_zone_camera ON camera_zone(camera_id);
 """
 
 INDEXES_SQL_TEMPLATE = r"""
@@ -476,6 +489,14 @@ def init_database(host="localhost", port=5432, user="postgres", password="postgr
                 END $$;
             """)
             run_sql(conn, "ALTER TABLE anomaly_review ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ")
+            run_sql(conn, """
+                INSERT INTO camera_zone (camera_id, name, sort_order, start_y, end_y, start_x, end_x)
+                VALUES
+                  ('Substation_Alpha_Cam1', 'Transformer 1',    0, 5,  13, 7,  13),
+                  ('Substation_Alpha_Cam1', 'Switchboard',      1, 10, 15, 20, 27),
+                  ('Substation_Beta_Cam1',  'Central Equipment', 0, 5, 20, 12, 26)
+                ON CONFLICT (camera_id, name) DO UPDATE SET sort_order = EXCLUDED.sort_order;
+            """)
             print("Ensuring partitions ...")
             ensure_partitions(conn, months_ahead=partitions_ahead, months_back=partitions_back)
             print("Done.")

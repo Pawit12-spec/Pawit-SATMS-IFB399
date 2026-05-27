@@ -27,8 +27,8 @@ from .sse import SSEBroker, stream
 import threading
 import time
 from .Alert_System import alert
-from .thermal_model.model import analyse_image as thermal_analyse_image, thermal_analytics
-from .thermal_model.substation_configs import get_zone_temperatures, EQUIPMENT_THRESHOLDS, update_equipment_counters
+from .thermal_model.model import analyse_image as thermal_analyse_image, thermal_analytics, localize_and_draw as thermal_localize
+from .thermal_model.substation_configs import get_zone_temperatures, EQUIPMENT_THRESHOLDS, update_equipment_counters, fetch_zones_from_db
 from .ml import score_reading, data_analytics
 
 bp = Blueprint("main", __name__, template_folder="templates")
@@ -714,11 +714,7 @@ def _load_site_info(site_id):
 @bp.route("/thermal/<site_id>")
 @login_required
 def thermal(site_id=None) -> str:
-    """Render the thermal camera page with the latest image metadata.
-
-    Returns:
-        str: Thermal camera template populated with latest and recent images.
-    """
+    """Render the thermal camera page with the latest image metadata."""
     site_info = _load_site_info(site_id)
     latest_image = get_latest_image()
     recent_images = get_recent_images(limit = 20)
@@ -730,11 +726,7 @@ def thermal(site_id=None) -> str:
     )
 
 def get_latest_image() -> dict | None:
-    """Fetch the newest thermal image metadata from InfluxDB.
-
-    Returns:
-        dict | None: Row containing filename and timestamp, or None when empty.
-    """
+    """Fetch the newest thermal image metadata from InfluxDB."""
     try:
         table = current_app.extensions["influx3"].query("""
             SELECT filename, time
@@ -752,14 +744,7 @@ def get_latest_image() -> dict | None:
 
 
 def get_recent_images(limit: int = 20) -> list:
-    """Return the most recent thermal image records up to ``limit`` entries.
-
-    Args:
-        limit (int, optional): Maximum number of images to retrieve. Defaults to 20.
-
-    Returns:
-        list[dict]: Ordered list of filename/timestamp pairs.
-    """
+    """Return the most recent thermal image records up to limit entries."""
     try:
         table = current_app.extensions["influx3"].query(f"""
             SELECT filename, time
@@ -785,26 +770,24 @@ def get_recent_images(limit: int = 20) -> list:
         current_app.logger.warning("Failed to get recent images: %s", exc)
         return []
 
-# This is possibly unsafe but it works for now :joy:
 @bp.get("/uploads/<path:filename>")
 def uploaded_file(filename: Path) -> Response:
-    """Serve a stored camera image from the configured upload directory.
-
-    Args:
-        filename (Path): Relative path segment of the image to retrieve.
-
-    Returns:
-        Response: Flask response streaming the requested file.
-    """
+    """Serve a stored camera image from the configured upload directory."""
     return send_from_directory(current_app.config["UPLOAD_DIR"], filename)
 
 
 @bp.post("/submit/camera")
 def upload_image():
-    """Validate, persist, and index an uploaded thermal image.
+    """Accept a thermal image from a Pi, classify it, and fire alerts if needed.
 
-    Returns:
-        Response: JSON payload describing the stored image.
+    camera_zones starts as None so that get_zone_temperatures and localize_and_draw
+    fall back to substation_zones.json when the DB is unavailable (None sentinel,
+    not an empty list — see fetch_zones_from_db).
+    Alert recipients are resolved from the camera's site escalation config; env-var
+    fallback applies when no site contact is configured.
+    equipment_fault_counters is module-level, keyed by site_id (or camera_id when the
+    device has no site) — counters persist across requests so the 3-consecutive-breach
+    rule works correctly across separate uploads.
     """
     if "image" not in request.files:
         return jsonify(error='Missing file field "image"'), 400
@@ -834,6 +817,16 @@ def upload_image():
     now_dt = datetime.now(Brisbane_Time)
     now_ns = to_ns(now_dt)
 
+    camera_zones = None
+    try:
+        _zconn = _get_pg_conn()
+        try:
+            camera_zones = fetch_zones_from_db(camera_id, _zconn)
+        finally:
+            _zconn.close()
+    except Exception as e:
+        current_app.logger.warning("Zone fetch failed, falling back to config file: %s", e)
+
     thermal_result   = thermal_analyse_image(str(save_path))
     thermal_analysis = thermal_analytics(thermal_result)
     if thermal_analysis["analysis"]:
@@ -860,12 +853,22 @@ def upload_image():
     except Exception:
         pass
 
-    # Hotspot alert
+    # Hotspot alert + HSV localisation
     if thermal_result["is_anomaly"]:
         try:
+            _, detections = thermal_localize(str(save_path), camera_id=camera_id, zones=camera_zones)
+            current_app.logger.info(
+                "Hotspot localised — %d blob(s) found [%s]", len(detections), camera_id
+            )
+        except Exception as e:
+            current_app.logger.warning("Hotspot localisation failed: %s", e)
+        try:
             a = alert.HighPriorityAlert(
-                f"Irregular hotspot detected — camera {camera_id}. "
-                f"Please ensure equipment is behaving correctly.\nTimestamp: {now_dt.isoformat()}",
+                f"HOTSPOT ALERT\n"
+                f"Camera: {camera_id}\n"
+                f"Irregular hotspot detected.\n"
+                f"Check equipment immediately.\n"
+                f"Time: {now_dt.isoformat()}",
                 camera_id, now_dt.isoformat(),
                 recipients_email=recipients_email,
                 recipients_phone=recipients_phone,
@@ -881,7 +884,7 @@ def upload_image():
         try:
             raw = json.loads(temp_data_raw)
             if len(raw) == 768:
-                zone_temps = get_zone_temperatures(camera_id, raw)
+                zone_temps = get_zone_temperatures(camera_id, raw, zones=camera_zones)
                 device_key = cam_site_id or camera_id
                 counters   = equipment_fault_counters.setdefault(
                     device_key, {name: 0 for name in EQUIPMENT_THRESHOLDS}
@@ -893,11 +896,14 @@ def upload_image():
                         print(f"[LOW] {name} [{device_key}]: 1st overheating reading. Temp: {reading['temp']}°C")
                     elif count == 2:
                         print(f"[MEDIUM] {name} [{device_key}]: 2nd consecutive overheating. Temp: {reading['temp']}°C")
-                    elif count >= 3:
+                    elif count == 3:
                         try:
                             a = alert.HighPriorityAlert(
-                                f"{name} overheating — {count} consecutive readings above {reading['threshold']}°C.\n"
-                                f"Last reading: {reading['temp']}°C. Immediate attention required!\nTimestamp: {now_dt.isoformat()}",
+                                f"EQUIPMENT ALERT\n"
+                                f"Zone: {name}\n"
+                                f"{count} consecutive readings above {reading['threshold']}C\n"
+                                f"Last reading: {reading['temp']}C\n"
+                                f"Time: {now_dt.isoformat()}",
                                 f"{name} [{camera_id}]", now_dt.isoformat(),
                                 recipients_email=recipients_email,
                                 recipients_phone=recipients_phone,
@@ -1149,10 +1155,11 @@ def check_phonenumber(raw: str):
 
 
 def _load_manage_context():
-    """Load users, sites, and contacts for the unified manage page."""
+    """Load users, sites, contacts, and camera zones for the unified manage page."""
     users_list = []
     sites = []
     contacts = []
+    zones = []
     try:
         conn = _get_pg_conn()
         try:
@@ -1202,11 +1209,28 @@ def _load_manage_context():
                     {"user_id": str(r[0]), "full_name": r[1], "email": r[2] or ""}
                     for r in cur.fetchall()
                 ]
+                cur.execute(
+                    "SELECT zone_id, camera_id, name, sort_order, start_y, end_y, start_x, end_x "
+                    "FROM camera_zone ORDER BY camera_id, sort_order, name"
+                )
+                zones = [
+                    {
+                        "zone_id":    str(r[0]),
+                        "camera_id":  r[1],
+                        "name":       r[2],
+                        "sort_order": r[3],
+                        "start_y":    r[4],
+                        "end_y":      r[5],
+                        "start_x":    r[6],
+                        "end_x":      r[7],
+                    }
+                    for r in cur.fetchall()
+                ]
         finally:
             conn.close()
     except Exception as e:
         current_app.logger.warning("Failed to load manage context: %s", e)
-    return users_list, sites, contacts
+    return users_list, sites, contacts, zones
 
 
 @bp.get("/users/<user_id>/assets")
@@ -1601,13 +1625,13 @@ def _parse_escalation_form():
 @role_required("asset_owner")
 def assets():
     """Render the unified manage (Settings) page."""
-    users_list, sites, contacts = _load_manage_context()
+    users_list, sites, contacts, zones = _load_manage_context()
     tab = request.args.get("tab", "users")
-    if tab not in ("users", "sites"):
+    if tab not in ("users", "sites", "zones"):
         tab = "users"
     return render_template(
         "manage.html",
-        users=users_list, sites=sites, contacts=contacts,
+        users=users_list, sites=sites, contacts=contacts, zones=zones,
         active_tab=tab,
     )
 
@@ -1792,6 +1816,135 @@ def delete_asset(site_id):
     return redirect(url_for("main.assets", success="Site deleted"))
 
 
+####### Camera zone CRUD ###############################################################
+
+def _parse_zone_form():
+    """Pull and validate zone coordinate fields from request.form."""
+    camera_id = request.form.get("camera_id", "").strip()
+    name      = request.form.get("name", "").strip()
+    try:
+        sort_order = int(request.form.get("sort_order", 0))
+        start_y    = int(request.form["start_y"])
+        end_y      = int(request.form["end_y"])
+        start_x    = int(request.form["start_x"])
+        end_x      = int(request.form["end_x"])
+    except (KeyError, ValueError):
+        return None, "All coordinate fields are required and must be integers"
+    if not camera_id or not name:
+        return None, "Camera ID and zone name are required"
+    if sort_order < 0:
+        return None, "Sort order must be non-negative"
+    if start_y < 0 or start_x < 0:
+        return None, "Coordinates must be non-negative"
+    if end_y <= start_y:
+        return None, "End row must be greater than start row"
+    if end_x <= start_x:
+        return None, "End column must be greater than start column"
+    return {"camera_id": camera_id, "name": name, "sort_order": sort_order,
+            "start_y": start_y, "end_y": end_y,
+            "start_x": start_x, "end_x": end_x}, None
+
+
+@bp.route("/zones/create", methods=["POST"])
+@role_required("asset_owner")
+def create_zone():
+    """POST /zones/create — insert a new equipment zone for a camera.
+
+    sort_order controls which EQUIPMENT_THRESHOLDS index this zone maps to
+    in update_equipment_counters. camera_id + name must be unique.
+    """
+    data, err = _parse_zone_form()
+    if err:
+        return redirect(url_for("main.assets", tab="zones", error=err))
+    try:
+        conn = _get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO camera_zone (camera_id, name, sort_order, start_y, end_y, start_x, end_x) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (data["camera_id"], data["name"], data["sort_order"],
+                     data["start_y"], data["end_y"], data["start_x"], data["end_x"]),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        current_app.logger.warning("Failed to create zone: %s", e)
+        return redirect(url_for("main.assets", tab="zones", error="Failed to create zone — check that camera ID and name are unique"))
+    write_audit_log(action="zone.create", old_setting=None, new_setting=data)
+    return redirect(url_for("main.assets", tab="zones", success="Zone created"))
+
+
+@bp.route("/zones/<zone_id>/edit", methods=["POST"])
+@role_required("asset_owner")
+def edit_zone(zone_id):
+    """POST /zones/<zone_id>/edit — update an existing equipment zone.
+
+    Reads the existing row before updating so the old values can be written to
+    the audit log.
+    """
+    data, err = _parse_zone_form()
+    if err:
+        return redirect(url_for("main.assets", tab="zones", error=err))
+    old_zone = None
+    try:
+        conn = _get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT camera_id, name, sort_order, start_y, end_y, start_x, end_x "
+                    "FROM camera_zone WHERE zone_id = %s", (zone_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    old_zone = {"camera_id": row[0], "name": row[1], "sort_order": row[2],
+                                "start_y": row[3], "end_y": row[4],
+                                "start_x": row[5], "end_x": row[6]}
+                cur.execute(
+                    "UPDATE camera_zone SET camera_id=%s, name=%s, sort_order=%s, "
+                    "start_y=%s, end_y=%s, start_x=%s, end_x=%s "
+                    "WHERE zone_id=%s",
+                    (data["camera_id"], data["name"], data["sort_order"],
+                     data["start_y"], data["end_y"], data["start_x"], data["end_x"],
+                     zone_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        current_app.logger.warning("Failed to update zone: %s", e)
+        return redirect(url_for("main.assets", tab="zones", error="Failed to update zone"))
+    write_audit_log(action="zone.update", old_setting=old_zone, new_setting=data)
+    return redirect(url_for("main.assets", tab="zones", success="Zone updated"))
+
+
+@bp.route("/zones/<zone_id>/delete", methods=["POST"])
+@role_required("asset_owner")
+def delete_zone(zone_id):
+    """POST /zones/<zone_id>/delete — remove an equipment zone and write an audit entry."""
+    old_zone = None
+    try:
+        conn = _get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT camera_id, name FROM camera_zone WHERE zone_id = %s", (zone_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    old_zone = {"camera_id": row[0], "name": row[1]}
+                cur.execute("DELETE FROM camera_zone WHERE zone_id = %s", (zone_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        current_app.logger.warning("Failed to delete zone: %s", e)
+        return redirect(url_for("main.assets", tab="zones", error="Failed to delete zone"))
+    write_audit_log(action="zone.delete", old_setting=old_zone, new_setting=None)
+    return redirect(url_for("main.assets", tab="zones", success="Zone deleted"))
+
+
 @bp.route("/init-db")
 def init_db():
     """Initialise the PostgreSQL database using app config."""
@@ -1830,9 +1983,6 @@ def monitor_offline_devices(current_time):
         state = pi_alert_state[device_id]
         offline_duration = int(current_time - last_heard)
         
-        # CONTINUOUS PRINT MESSAGE FOR DEBUGGING PURPOSES TO SEE THE DURATION IN REAL-TIME
-        print(f"[Failsafe Check] {device_id} | Offline Duration: {offline_duration}s")
-            
         if offline_duration > 20:
             state["is_offline"] = True
             should_alert = False
@@ -1871,7 +2021,7 @@ def monitor_offline_devices(current_time):
                         state["last_daily"] = period
 
             if should_alert:
-                message = f"CRITICAL: {device_id} IS OFFLINE. TOTAL DOWNTIME: {time_str}."
+                message = f"DEVICE OFFLINE\nDevice: {device_id}\nTotal downtime: {time_str}"
                 print(message)
                 try:
                     offline_alert = alert.HighPriorityAlert(
@@ -1886,7 +2036,7 @@ def monitor_offline_devices(current_time):
         else:
             # 4. Device is ONLINE (duration < 20s)
             if state["is_offline"]:
-                message = f"RECOVERY: {device_id} IS BACK ONLINE! Connection restored."
+                message = f"DEVICE RECOVERED\nDevice: {device_id}\nConnection restored."
                 print(message)
                 try:
                     recovery_alert = alert.HighPriorityAlert(
@@ -1905,6 +2055,11 @@ def monitor_offline_devices(current_time):
             }
 
 def monitor_heartbeats(app):
+    """Daemon thread loop: poll monitor_offline_devices every 10 seconds with an app context.
+
+    Separated from the core logic so pytest can call monitor_offline_devices directly
+    with a fake timestamp, without needing to manage the thread lifecycle.
+    """
     while True:
         try:
             with app.app_context():

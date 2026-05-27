@@ -13,6 +13,13 @@ client = Client(account_sid, auth_token)
 
 
 class HighPriorityAlert:
+    """High-priority alert dispatched by email (Resend) and SMS (Twilio).
+
+    Construct with message, source, and timestamp. Pass recipient lists at
+    construction or per trigger() call; if neither is provided, trigger() falls
+    back to the ALERT_TO_EMAIL / ALERT_TO_PHONE env vars.
+    """
+
     def __init__(self, message, source, timestamp, recipients_email=None, recipients_phone=None):
         self.message          = message
         self.source           = source
@@ -34,15 +41,18 @@ class HighPriorityAlert:
         resend.Emails.send(params)
 
     def send_sms(self, message_body, recipient):
+        """Send SMS via Twilio. recipient must be a phone number without a leading +;
+        this method prepends it before calling the API."""
         from_phone = os.getenv("TWILIO_FROM_PHONE")
-        print(f"SMS sent to +{recipient} with message: {message_body}")
         client.messages.create(
-            body=f"{message_body}\nDispatched to: +{recipient}",
+            body=f"{message_body}\nDispatched to: emergency contact",
             from_=from_phone,
             to=f"+{recipient}",
         )
 
     def trigger(self, recipient_email=None, recipient_phone=None):
+        """Dispatch the alert. Per-call args override the instance recipient lists;
+        if neither is set, falls back to ALERT_TO_EMAIL / ALERT_TO_PHONE env vars."""
         self.print_alert()
 
         if recipient_email is not None or recipient_phone is not None:

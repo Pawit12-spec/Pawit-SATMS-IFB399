@@ -1,0 +1,9 @@
+{
+    "Substation_Alpha_Cam1": [
+        {"name": "Transformer 1", "startY": 5,  "endY": 13, "startX": 7,  "endX": 13},
+        {"name": "Switchboard",   "startY": 10, "endY": 15, "startX": 20, "endX": 27}
+    ],
+    "Substation_Beta_Cam1": [
+        {"name": "Central Equipment", "startY": 5, "endY": 20, "startX": 12, "endX": 26}
+    ]
+}
