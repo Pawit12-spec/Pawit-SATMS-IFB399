@@ -770,7 +770,6 @@ def get_recent_images(limit: int = 20) -> list:
         current_app.logger.warning("Failed to get recent images: %s", exc)
         return []
 
-# This is possibly unsafe but it works for now :joy:
 @bp.get("/uploads/<path:filename>")
 def uploaded_file(filename: Path) -> Response:
     """Serve a stored camera image from the configured upload directory."""
@@ -1984,9 +1983,6 @@ def monitor_offline_devices(current_time):
         state = pi_alert_state[device_id]
         offline_duration = int(current_time - last_heard)
         
-        # CONTINUOUS PRINT MESSAGE FOR DEBUGGING PURPOSES TO SEE THE DURATION IN REAL-TIME
-        print(f"[Failsafe Check] {device_id} | Offline Duration: {offline_duration}s")
-            
         if offline_duration > 20:
             state["is_offline"] = True
             should_alert = False

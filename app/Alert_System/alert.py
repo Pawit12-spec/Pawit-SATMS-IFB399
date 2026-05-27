@@ -44,7 +44,6 @@ class HighPriorityAlert:
         """Send SMS via Twilio. recipient must be a phone number without a leading +;
         this method prepends it before calling the API."""
         from_phone = os.getenv("TWILIO_FROM_PHONE")
-        print(f"SMS sent to +{recipient} with message: {message_body}")
         client.messages.create(
             body=f"{message_body}\nDispatched to: emergency contact",
             from_=from_phone,
